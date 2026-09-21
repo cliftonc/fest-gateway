@@ -834,3 +834,38 @@ test("the feed and the per-user rollup are index-driven, never table scans", (t)
     assert.ok(USES_INDEX.test(joined), `${name} used no index: ${joined}`);
   }
 });
+
+/**
+ * Feed columns must cover every field `RequestRow` claims to have.
+ *
+ * Written after a real one: `pipeline`, `route_id` and
+ * `credentials_considered` were written correctly by the writer and read
+ * correctly by the mapper, but `FEED_COLUMNS` never selected them — so the API
+ * silently returned the SCHEMA DEFAULTS. Every substituted request reported
+ * `pipeline: "passthrough"`, `routeId: null` and an empty credential trail:
+ * plausible values, uniformly wrong, and invisible to any test that did not
+ * compare the projection against the type.
+ *
+ * Asserting the SELECT list against the mapper's output is what makes the next
+ * added field fail loudly instead of defaulting quietly.
+ */
+test("the feed SELECT covers every column the row mapper reads", () => {
+  const { sql } = feedSql({ orgId: "org", role: "admin" }, {});
+  const selected = sql.slice(0, sql.indexOf("FROM"));
+
+  for (const column of [
+    "pipeline",
+    "route_id",
+    "credentials_considered",
+    "cost_usd",
+    "cost_basis",
+    "rl_claim",
+    "client_version",
+    "service_tier",
+  ]) {
+    assert.ok(
+      selected.includes(`r.${column}`),
+      `${column} is read by toRequestRow but not selected — it will silently return the column default`,
+    );
+  }
+});

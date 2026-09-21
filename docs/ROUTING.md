@@ -136,20 +136,49 @@ bill), and a Claude Code request is routinely megabytes that we should not copy
 to change twenty bytes. If anything about the body is unexpected, the original
 bytes are returned unchanged — a failed rewrite must never corrupt a request.
 
-## ⚠ Not yet verified against the live Fireworks API
+## Verified against the live Fireworks API (2026-09-21)
 
-The Fireworks adapter assumes Fireworks serves an **Anthropic-compatible**
-`/v1/messages`. That is inferred from `fireconnect`, which points Claude Code at
-`https://api.fireworks.ai/inference` as `ANTHROPIC_BASE_URL` — which only works
-if the Messages request and SSE formats are accepted. Strong evidence, but
-inference, not a test: there was no Fireworks key available when this was
-written.
+The compatibility claim is now tested, not inferred.
 
-Consequences if the assumption is wrong: the adapter would need request and
-response translation, and — more importantly — its own stream reader, because
-the current path reuses the Anthropic SSE parser and usage accumulator
-unchanged. The routing, credential and visibility work is unaffected either way.
+- `POST https://api.fireworks.ai/inference/v1/messages` returns **200** with an
+  Anthropic-shaped body and Anthropic-shaped `usage`
+  (`input_tokens`, `output_tokens`, `cache_read_input_tokens`,
+  `cache_creation_input_tokens`).
+- Streaming emits `message_start`, `content_block_delta`, `message_delta`,
+  `ping` — so the existing SSE parser and usage accumulator meter this path
+  unchanged. Checked by feeding the real captured bytes through the accumulator.
 
-**Owed:** one real request against Fireworks with a live key, checking that
-`/v1/messages` is accepted and that `message_start`/`message_delta` usage events
-arrive in the shape the accumulator expects.
+### One behavioural difference worth knowing
+
+Anthropic reports input tokens in `message_start`. **Fireworks sends zeros
+there** and the real figures only in `message_delta`, at the END of the stream:
+
+```
+message_start  usage: input 0,  cache_read 0
+message_delta  usage: input 1,  cache_read 73, output 24
+```
+
+Totals are correct either way — the accumulator merges last-wins per field — but
+an **aborted** Fireworks stream records `input_tokens: 0`, where an aborted
+Anthropic stream still captures them from `message_start`. Those records are
+already flagged `partial`, so this is a fidelity limit on cancelled turns rather
+than a wrong number. A mock could not have surfaced it.
+
+### Two bugs the live test found that mocks could not
+
+1. **The upstream path prefix was being discarded.** `new URL("/v1/messages",
+   base)` treats a leading slash as absolute and drops the base's own path, so
+   `https://api.fireworks.ai/inference` became
+   `https://api.fireworks.ai/v1/messages` — a 404 from the provider. Invisible
+   to every test here, because a mock upstream at `http://127.0.0.1:PORT` has no
+   prefix to lose. Fixed in `adapters/url.ts`; the integration mocks now mount
+   under `/inference` so the prefix is always exercised.
+
+2. **`FEED_COLUMNS` never selected the new columns.** The writer stored
+   `pipeline`, `route_id` and `credentials_considered` correctly and the row
+   mapper read them correctly, but the SELECT list omitted them — so the API
+   returned the *schema defaults*. Every substituted request reported
+   `pipeline: "passthrough"`, `routeId: null` and an empty credential trail:
+   plausible values, uniformly wrong. A test now asserts the SELECT list covers
+   every column the mapper reads, so the next added field fails loudly instead
+   of defaulting quietly.

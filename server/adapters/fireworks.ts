@@ -31,6 +31,7 @@
 
 import type { Adapter, AdapterPlan, AdapterRequest } from "./index.ts";
 import { rewriteModel } from "./rewrite.ts";
+import { joinUpstreamUrl } from "./url.ts";
 
 export const fireworksAdapter: Adapter = {
   id: "fireworks",
@@ -42,7 +43,7 @@ export const fireworksAdapter: Adapter = {
   ],
 
   plan(req: AdapterRequest): AdapterPlan {
-    const url = new URL(req.path, `${req.upstream.baseUrl}/`);
+    const url = joinUpstreamUrl(req.upstream.baseUrl, req.path);
 
     const headers = new Headers({
       // Fireworks authenticates with a bearer, not Anthropic's x-api-key.

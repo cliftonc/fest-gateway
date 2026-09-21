@@ -11,6 +11,7 @@
 
 import type { Adapter, AdapterPlan, AdapterRequest } from "./index.ts";
 import { rewriteModel } from "./rewrite.ts";
+import { joinUpstreamUrl } from "./url.ts";
 
 export const anthropicAdapter: Adapter = {
   id: "anthropic",
@@ -21,7 +22,7 @@ export const anthropicAdapter: Adapter = {
   ],
 
   plan(req: AdapterRequest): AdapterPlan {
-    const url = new URL(req.path, `${req.upstream.baseUrl}/`);
+    const url = joinUpstreamUrl(req.upstream.baseUrl, req.path);
 
     const headers = new Headers({
       // An org API key goes in x-api-key. Deliberately NOT `authorization`:

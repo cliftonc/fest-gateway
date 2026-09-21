@@ -64,12 +64,20 @@ function sseResponse(res: http.ServerResponse): void {
   res.end();
 }
 
+/**
+ * Note the `/inference` prefix on the mock's base URL.
+ *
+ * Every mock here used to run at the server root, which made an entire class of
+ * URL-joining bug invisible: `new URL("/v1/messages", base)` discards the
+ * base's path, and with no path there was nothing to discard. The real
+ * Fireworks endpoint has one. The prefix stays.
+ */
 const routesFor = (upstreamUrl: string): string =>
   JSON.stringify({
     upstreams: {
       fireworks: {
         adapter: "fireworks",
-        baseUrl: upstreamUrl,
+        baseUrl: `${upstreamUrl}/inference`,
         credential: "{env:FIREWORKS_API_KEY}",
       },
     },
@@ -152,7 +160,11 @@ test("the model is rewritten and the request reaches the provider's path", async
         const seen = upstream.seen[0];
         assert.equal(JSON.parse(seen?.body ?? "{}").model, "accounts/x/oss-120b");
         // Phase 0: the query string is load-bearing and must survive routing.
-        assert.match(seen?.path ?? "", /^\/v1\/messages\?beta=true$/);
+        assert.match(
+          seen?.path ?? "",
+          /^\/inference\/v1\/messages\?beta=true$/,
+          "the upstream's own path prefix must survive, and so must the query string",
+        );
       },
     );
   } finally {

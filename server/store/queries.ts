@@ -333,7 +333,8 @@ const FEED_COLUMNS = `
   r.input_tokens, r.cache_read_tokens, r.cache_write_5m_tokens,
   r.cache_write_1h_tokens, r.output_tokens, r.web_searches, r.service_tier,
   r.cost_usd, r.cost_basis, r.ttfb_ms, r.duration_ms,
-  r.rl_5h_utilization, r.rl_claim, r.client_version`;
+  r.rl_5h_utilization, r.rl_claim, r.client_version,
+  r.pipeline, r.route_id, r.credentials_considered`;
 
 /**
  * Build the feed SQL and params. Exported so the query-plan test can assert on
