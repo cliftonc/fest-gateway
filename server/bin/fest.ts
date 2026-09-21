@@ -30,6 +30,7 @@ import { createRequestWriter } from "../store/write.ts";
 import { startRetention, DEFAULT_RETENTION } from "../store/retention.ts";
 import { seed, existingRequestCount, isDefaultDatabase } from "../store/seed.ts";
 import { parseRouteTable, EMPTY_ROUTE_TABLE } from "../routes/table.ts";
+import { watchRoutes } from "../routes/watch.ts";
 import type { RouteTable } from "../routes/table.ts";
 import { readFile } from "node:fs/promises";
 
@@ -70,6 +71,11 @@ async function loadRoutes(cfg: FestConfig): Promise<RouteTable> {
 
 async function cmdServe(cfg: FestConfig): Promise<void> {
   const routes = await loadRoutes(cfg);
+  // Edits to routes.json take effect without a restart. `node --watch` only
+  // tracks imported .ts files, so without this an edit appeared to do nothing —
+  // which reads as "my config is wrong" rather than "it has not been loaded".
+  const routeWatcher =
+    cfg.routesPath === null ? null : watchRoutes(cfg.routesPath, routes);
   const store = await withStore(cfg);
   const org = ensureOrg(store);
   const writer = createRequestWriter(store);
@@ -100,7 +106,7 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     config: cfg,
     sink,
     bus,
-    routes,
+    routes: routeWatcher === null ? routes : () => routeWatcher.current(),
     orgId: org.id,
     store,
     resolveIdentity: (raw) => resolveToken(store, raw),
@@ -124,6 +130,7 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     const finish = (): void => {
       void sink.close().then(() => {
         retention.stop();
+        routeWatcher?.stop();
         lastUsed.stop();
         store.close();
         log.info("drained", { sink: sink.stats() });

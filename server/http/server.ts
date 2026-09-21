@@ -38,8 +38,14 @@ export interface ServerDeps {
   readonly store: Store;
   readonly resolveIdentity: (raw: string | null) => { tokenId: string; userId: string } | null;
   readonly touchToken?: ((tokenId: string) => void) | undefined;
-  /** Model routing. Absent means everything passes through, which is the default. */
-  readonly routes?: RouteTable | undefined;
+  /**
+   * Model routing. Absent means everything passes through, which is the default.
+   *
+   * A FUNCTION rather than a value so the table can be hot-reloaded: every
+   * request asks for the current one. Passing a value would capture whatever
+   * was loaded at boot and quietly ignore every later edit.
+   */
+  readonly routes?: RouteTable | (() => RouteTable) | undefined;
   /** Injected so tests can resolve credentials without touching process.env. */
   readonly secrets?: SecretResolver | undefined;
 }
@@ -58,6 +64,10 @@ export function createServer(deps: ServerDeps): Server {
     log.info("dashboard bundle not built; serving API only", { expected: WEB_DIST });
   }
 
+  const configured = deps.routes;
+  const routesOf: () => RouteTable =
+    typeof configured === "function" ? configured : () => configured ?? EMPTY_ROUTE_TABLE;
+
   const ctx: DispatchContext = {
     upstreamBaseUrl: deps.config.upstreamBaseUrl,
     sink: deps.sink,
@@ -65,7 +75,7 @@ export function createServer(deps: ServerDeps): Server {
     orgId: deps.orgId,
     resolveIdentity: deps.resolveIdentity,
     touchToken: deps.touchToken,
-    routes: deps.routes ?? EMPTY_ROUTE_TABLE,
+    routes: EMPTY_ROUTE_TABLE,
     secrets: deps.secrets ?? createEnvResolver(),
   };
 
@@ -94,7 +104,7 @@ export function createServer(deps: ServerDeps): Server {
             sink: deps.sink,
             bus: deps.bus,
             orgId: deps.orgId,
-            routes: ctx.routes,
+            routes: routesOf(),
             secrets: ctx.secrets,
           })
         ) {
@@ -147,7 +157,7 @@ export function createServer(deps: ServerDeps): Server {
         // subscription auth in the first place.
         if (path === "/v1/models" && (method === "GET" || method === "HEAD")) {
           const inm = req.headers["if-none-match"];
-          handleModels(res, ctx.routes, Array.isArray(inm) ? inm[0] : inm);
+          handleModels(res, routesOf(), Array.isArray(inm) ? inm[0] : inm);
           return;
         }
 
@@ -164,7 +174,7 @@ export function createServer(deps: ServerDeps): Server {
         }
 
         if (path === "/v1/messages" && method === "POST") {
-          await dispatchMessages(req, res, ctx);
+          await dispatchMessages(req, res, { ...ctx, routes: routesOf() });
           return;
         }
 

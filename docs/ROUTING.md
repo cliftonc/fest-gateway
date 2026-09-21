@@ -66,6 +66,40 @@ silent-billing-substitution failure this whole design is built against.
 
 Run with `FEST_ROUTES=./routes.json npm start`, or set `FEST_ROUTES` in `.env`.
 
+### Edits apply without a restart
+
+The file is watched, so adding a route takes effect in a second or two. This
+matters more than convenience: `node --watch` only tracks imported `.ts` files,
+so before this an edit to `routes.json` appeared to do *nothing* — which reads
+as "my config is wrong" rather than "it has not been loaded".
+
+**An invalid edit is rejected and the previous table stays in force.** A typo
+must change nothing, loudly — degrading to "no routing" would silently push
+substituted traffic back onto developers' subscriptions, which is the exact
+failure this project is built against. There is a `stat` backstop alongside
+`fs.watch`, because watch events are dropped immediately after attach and never
+fire at all on some container mounts.
+
+### `expose`: making a substitution visible in `/model`
+
+Claude Code **dedupes** gateway menu entries against its built-in list, so
+publishing `claude-sonnet-5` collides with the built-in Sonnet and is dropped
+silently. The destination label could therefore never render for exactly the
+models most likely to be substituted.
+
+`expose` publishes a distinct, non-colliding id that routes to the same place:
+
+```jsonc
+{ "id": "sonnet-to-kimi", "match": "claude-sonnet-*", "upstream": "fireworks",
+  "model": "accounts/fireworks/models/kimi-k2p7-code",
+  "expose": "claude-kimi-k2-code" }
+```
+
+It appears in the picker as `claude-kimi-k2-code → fireworks`, under "From
+gateway". The alias must still match `/(claude|anthropic)/i` or the client
+filters it out — Fest rejects one that would not, at boot, because a vanishing
+entry is indistinguishable from a working config.
+
 ### Matching
 
 First the most **exact** rule, then the **longest** wildcard, then file order.
