@@ -1087,7 +1087,7 @@ export function latestQuotaByUser(store: Store, scope: Scope): QuotaSnapshot[] {
     ) q
     LEFT JOIN users u ON u.id = q.user_id AND u.org_id = q.org_id
     WHERE q.rn = 1
-    ORDER BY q.observed_at DESC`;
+    ORDER BY q.started_at DESC`;
   return (store.db.prepare(sql).all(...scoped.params) as Row[]).map((row) => ({
     userId: strOrNull(row["user_id"]),
     email: strOrNull(row["email"]),
