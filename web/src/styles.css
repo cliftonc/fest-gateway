@@ -1,0 +1,192 @@
+/*
+ * One stylesheet, no framework. The dashboard is six screens of tables,
+ * numbers and three charts; a utility framework would be more bytes than the
+ * application.
+ *
+ * Colour carries meaning in exactly one place — `tone-*` — and it is always
+ * paired with text, because "the red one" is not information an admin can act
+ * on over a screen share, and half of them cannot see it anyway.
+ */
+
+:root {
+  --bg: #0e1116;
+  --panel: #161b22;
+  --panel-2: #1c232c;
+  --line: #2a323d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+  --sub: #a371f7;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f8fa;
+    --panel: #ffffff;
+    --panel-2: #f0f3f6;
+    --line: #d8dee4;
+    --text: #1f2328;
+    --muted: #636c76;
+    --accent: #0969da;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --sub: #8250df;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+
+code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
+
+a { color: var(--accent); }
+
+/* ── Shell ─────────────────────────────────────────────────────────────── */
+
+.app { display: grid; grid-template-columns: 210px 1fr; min-height: 100vh; }
+
+.side {
+  border-right: 1px solid var(--line);
+  padding: 18px 12px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brand { font-weight: 700; font-size: 17px; padding: 0 10px 14px; letter-spacing: 0.02em; }
+.brand small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; letter-spacing: 0; }
+
+.nav-link {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: var(--text);
+  text-decoration: none;
+}
+.nav-link:hover { background: var(--panel-2); }
+.nav-link[aria-current="page"] { background: var(--accent); color: #fff; }
+
+.side-foot { margin-top: auto; padding: 10px; color: var(--muted); font-size: 11.5px; }
+
+.main { padding: 20px 24px 60px; max-width: 1400px; }
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.page-head h1 { font-size: 20px; margin: 0; }
+.page-head .sub { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
+
+/* ── Cards, stats ──────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+.card-head h2 { font-size: 14px; margin: 0; }
+.card-head .sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; max-width: 70ch; }
+
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+.stat-label { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.stat-value { font-size: 21px; font-weight: 600; margin-top: 2px; }
+.stat-note { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+
+.tone-ok { color: var(--ok); }
+.tone-warn { color: var(--warn); }
+.tone-bad { color: var(--bad); }
+.tone-muted { color: var(--muted); }
+
+/* ── Pills, meters ─────────────────────────────────────────────────────── */
+
+.pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.pill.tone-ok { color: var(--ok); }
+.pill.tone-warn { color: var(--warn); }
+.pill.tone-bad { color: var(--bad); }
+.pill.tone-info { color: var(--accent); }
+.pill.tone-muted { color: var(--muted); }
+
+.meter { background: var(--panel-2); border-radius: 999px; height: 7px; overflow: hidden; min-width: 90px; }
+.meter-fill { height: 100%; border-radius: 999px; }
+.meter-fill.tone-ok { background: var(--ok); }
+.meter-fill.tone-warn { background: var(--warn); }
+.meter-fill.tone-bad { background: var(--bad); }
+.meter-fill.tone-info { background: var(--accent); }
+
+.muted { color: var(--muted); }
+.state { padding: 14px 2px; }
+.state.bad { color: var(--bad); }
+
+/* ── Tables ────────────────────────────────────────────────────────────── */
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+tbody tr:hover { background: var(--panel-2); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.is-new { animation: flash 1.2s ease-out; }
+@keyframes flash { from { background: rgba(88, 166, 255, 0.18); } to { background: transparent; } }
+
+/* ── Controls ──────────────────────────────────────────────────────────── */
+
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+select, button, input {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 13px;
+}
+button { cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.active { border-color: var(--accent); color: var(--accent); }
+
+label.check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+
+.chart { margin-top: 4px; }
+
+.banner {
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: var(--radius);
+  padding: 9px 13px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.banner.bad { border-color: var(--bad); color: var(--bad); }
+
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }

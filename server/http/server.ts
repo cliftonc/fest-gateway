@@ -17,11 +17,16 @@ import type { UsageSink } from "../ingest/sink.ts";
 import type { FestConfig } from "../config.ts";
 import type { Store } from "../store/db.ts";
 import { handleApi } from "../api/routes.ts";
+import type { LiveBus } from "../ingest/live-bus.ts";
+import { createStaticHost } from "./static.ts";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { log } from "../log.ts";
 
 export interface ServerDeps {
   readonly config: FestConfig;
   readonly sink: UsageSink;
+  readonly bus: LiveBus;
   readonly orgId: string;
   readonly store: Store;
   readonly resolveIdentity: (raw: string | null) => { tokenId: string; userId: string } | null;
@@ -33,7 +38,15 @@ function pathnameOf(url: string): string {
   return q === -1 ? url : url.slice(0, q);
 }
 
+/** `web/dist`, relative to this file, so it resolves from any cwd. */
+const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
+
 export function createServer(deps: ServerDeps): Server {
+  const web = createStaticHost(WEB_DIST);
+  if (!web.available) {
+    log.info("dashboard bundle not built; serving API only", { expected: WEB_DIST });
+  }
+
   const ctx: PassthroughContext = {
     upstreamBaseUrl: deps.config.upstreamBaseUrl,
     sink: deps.sink,
@@ -62,7 +75,14 @@ export function createServer(deps: ServerDeps): Server {
 
         // Dashboard JSON API. Every endpoint is a projection of one function in
         // store/queries.ts, where org and member scoping is enforced.
-        if (handleApi(req, res, path, { store: deps.store, sink: deps.sink, orgId: deps.orgId })) {
+        if (
+          handleApi(req, res, path, {
+            store: deps.store,
+            sink: deps.sink,
+            bus: deps.bus,
+            orgId: deps.orgId,
+          })
+        ) {
           return;
         }
 
@@ -110,6 +130,10 @@ export function createServer(deps: ServerDeps): Server {
           await handleMessages(req, res, ctx);
           return;
         }
+
+        // The dashboard, when built. Last, so it can never shadow the proxy or
+        // the API, and narrow enough that an unknown /v1/ path still 404s.
+        if ((method === "GET" || method === "HEAD") && web.serve(res, path)) return;
 
         // Unknown paths are the early-warning system for Claude Code releases
         // adding endpoints: a warn line here is how we find out before users do.

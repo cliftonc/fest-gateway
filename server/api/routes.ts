@@ -26,6 +26,16 @@ import {
   latestQuotaByUser,
 } from "../store/queries.ts";
 import type { UsageSink } from "../ingest/sink.ts";
+import type { LiveBus } from "../ingest/live-bus.ts";
+import { handleLive } from "./live.ts";
+import type {
+  OverviewResponse,
+  RequestsResponse,
+  UsersResponse,
+  ModelsResponse,
+  ErrorsResponse,
+  QuotaResponse,
+} from "../../shared/api.ts";
 
 const DEFAULT_RANGE_MS = 24 * 3_600_000;
 const MAX_RANGE_MS = 400 * 86_400_000;
@@ -57,6 +67,7 @@ function strParam(params: URLSearchParams, name: string): string | undefined {
 export interface ApiDeps {
   readonly store: Store;
   readonly sink: UsageSink;
+  readonly bus: LiveBus;
   readonly orgId: string;
 }
 
@@ -94,6 +105,13 @@ export function handleApi(
   // because every query already takes it explicitly.
   const scope: Scope = { orgId: deps.orgId, role: "admin" };
 
+  // SSE, so it owns its own response lifecycle and must not fall through to
+  // the JSON writer below.
+  if (path === "/api/live") {
+    handleLive(req, res, deps.bus);
+    return true;
+  }
+
   switch (path) {
     case "/api/overview":
       json(res, 200, {
@@ -103,7 +121,7 @@ export function handleApi(
         byCredentialOrigin: usageByCredentialOrigin(deps.store, scope, range),
         latency: latencySummary(deps.store, scope, range),
         sink: deps.sink.stats(),
-      });
+      } satisfies OverviewResponse);
       return true;
 
     case "/api/requests": {
@@ -118,16 +136,16 @@ export function handleApi(
         ...(intParam(params, "before") !== undefined ? { beforeSeq: intParam(params, "before") } : {}),
         ...(intParam(params, "limit") !== undefined ? { limit: intParam(params, "limit") } : {}),
       };
-      json(res, 200, listRequests(deps.store, scope, filter));
+      json(res, 200, listRequests(deps.store, scope, filter) satisfies RequestsResponse);
       return true;
     }
 
     case "/api/users":
-      json(res, 200, { range, rows: usageByUser(deps.store, scope, range) });
+      json(res, 200, { range, rows: usageByUser(deps.store, scope, range) } satisfies UsersResponse);
       return true;
 
     case "/api/models":
-      json(res, 200, { range, rows: usageByModel(deps.store, scope, range) });
+      json(res, 200, { range, rows: usageByModel(deps.store, scope, range) } satisfies ModelsResponse);
       return true;
 
     case "/api/errors":
@@ -135,12 +153,12 @@ export function handleApi(
         range,
         rows: errorBreakdown(deps.store, scope, range),
         latency: latencySummary(deps.store, scope, range),
-      });
+      } satisfies ErrorsResponse);
       return true;
 
     // For a subscription developer this, not cost, is the scarce resource.
     case "/api/quota":
-      json(res, 200, { rows: latestQuotaByUser(deps.store, scope) });
+      json(res, 200, { rows: latestQuotaByUser(deps.store, scope) } satisfies QuotaResponse);
       return true;
 
     default:

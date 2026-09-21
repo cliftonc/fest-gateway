@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
@@ -12,7 +16,18 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["server/**/*.ts", "shared/**/*.ts", "tools/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "server/**/*.ts",
+    "shared/**/*.ts",
+    "tools/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "web/**/*",
+    "node_modules"
+  ]
 }

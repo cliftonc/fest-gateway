@@ -5,3 +5,4 @@ dist/
 capture-*.jsonl
 .DS_Store
 data/
+web/dist/

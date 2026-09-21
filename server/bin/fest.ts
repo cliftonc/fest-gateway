@@ -7,6 +7,9 @@
  *   fest token create <email> [name]  mint an identity token (shown once)
  *   fest token list
  *   fest token revoke <token-id>
+ *   fest seed [--requests N] [--hours N] [--force]
+ *                                     synthetic traffic, for looking at the
+ *                                     dashboard without a live session
  */
 
 import { mkdir } from "node:fs/promises";
@@ -14,6 +17,7 @@ import { dirname } from "node:path";
 import { loadConfig, describeConfig } from "../config.ts";
 import type { FestConfig } from "../config.ts";
 import { createUsageSink } from "../ingest/sink.ts";
+import { createLiveBus } from "../ingest/live-bus.ts";
 import { createServer } from "../http/server.ts";
 import { log, setLogLevel } from "../log.ts";
 import { openStore, migrate } from "../store/db.ts";
@@ -22,6 +26,7 @@ import { ensureOrg, ensureUser, findUserByEmail } from "../store/bootstrap.ts";
 import { createToken, listTokens, revokeToken, resolveToken, createLastUsedTracker } from "../store/tokens.ts";
 import { createRequestWriter } from "../store/write.ts";
 import { startRetention, DEFAULT_RETENTION } from "../store/retention.ts";
+import { seed, existingRequestCount } from "../store/seed.ts";
 
 const out = (s: string): void => void process.stdout.write(s + "\n");
 
@@ -45,17 +50,27 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
   const retention = startRetention(store, DEFAULT_RETENTION);
 
   await mkdir(dirname(cfg.usageLogPath), { recursive: true });
+  const bus = createLiveBus();
   const sink = createUsageSink({
     path: cfg.usageLogPath,
     // The store is the system of record; JSONL stays as a cheap, greppable
     // trail. Pricing and persistence both happen here in the flush, never on
     // the request path.
-    onBatch: (records) => writer.writeBatch(org.id, records),
+    //
+    // The live feed is published AFTER the write, so a dashboard never shows a
+    // row that then fails to persist. A throwing write requeues the batch and
+    // publishes on the retry instead, which is the right way round: the feed
+    // may lag the truth, but it must not contradict it.
+    onBatch: (records) => {
+      writer.writeBatch(org.id, records);
+      bus.publish(records);
+    },
   });
 
   const server = createServer({
     config: cfg,
     sink,
+    bus,
     orgId: org.id,
     store,
     resolveIdentity: (raw) => resolveToken(store, raw),
@@ -131,6 +146,44 @@ async function cmdToken(cfg: FestConfig, argv: readonly string[]): Promise<void>
   store.close();
 }
 
+function intFlag(argv: readonly string[], name: string): number | undefined {
+  const i = argv.indexOf(`--${name}`);
+  if (i === -1) return undefined;
+  const n = Number(argv[i + 1]);
+  if (!Number.isInteger(n) || n <= 0) throw new Error(`--${name} needs a positive integer`);
+  return n;
+}
+
+async function cmdSeed(cfg: FestConfig, argv: readonly string[]): Promise<void> {
+  const store = await withStore(cfg);
+  const existing = existingRequestCount(store);
+
+  // Invented numbers must never be blended into observed ones. A dashboard is
+  // only worth anything if you can trust that what it shows was measured.
+  if (existing > 0 && !argv.includes("--force")) {
+    store.close();
+    throw new Error(
+      `${cfg.dbPath} already holds ${existing} request(s).\n` +
+        "Seeding would mix synthetic rows into real traffic. Use a scratch database:\n" +
+        "  FEST_DB=./data/demo.db npm run seed\n" +
+        "or pass --force if you are certain this database is disposable.",
+    );
+  }
+
+  const requests = intFlag(argv, "requests");
+  const hours = intFlag(argv, "hours");
+  const result = seed(store, {
+    ...(requests === undefined ? {} : { requests }),
+    ...(hours === undefined ? {} : { hours }),
+  });
+  store.close();
+
+  out(`seeded ${result.written} synthetic requests into ${cfg.dbPath}`);
+  out(`developers: ${result.users.join(", ")}`);
+  out("");
+  out("These rows are INVENTED. Delete the database before trusting any number in it.");
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const cmd = argv[0] ?? "serve";
@@ -152,10 +205,16 @@ async function main(): Promise<void> {
     case "token":
       await cmdToken(cfg, argv.slice(1));
       return;
+    case "seed":
+      await cmdSeed(cfg, argv.slice(1));
+      return;
     case "help":
     case "--help":
     case "-h":
-      out("fest serve | migrate | token create <email> [name] | token list | token revoke <id>");
+      out(
+        "fest serve | migrate | seed [--requests N] [--hours N] [--force] |\n" +
+          "     token create <email> [name] | token list | token revoke <id>",
+      );
       return;
     default:
       throw new Error(`unknown command: ${cmd}`);
