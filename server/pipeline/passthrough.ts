@@ -159,7 +159,12 @@ export async function handleMessages(
   const denyIdentity = (message: string): void => {
     const type = "authentication_error";
     finish({ status: "identity_denied", httpStatus: statusForErrorType(type) });
-    res.writeHead(statusForErrorType(type), { "content-type": "application/json" });
+    res.writeHead(statusForErrorType(type), {
+      "content-type": "application/json",
+      // Nothing a retry can fix; the client honours this ahead of its own
+      // status-code rules, so say so rather than letting it back off ten times.
+      "x-should-retry": "false",
+    });
     // Claude Code renders error.message to the developer, so this string is
     // the user-facing UI. Write it for a human who is mid-task.
     res.end(anthropicError(type, message));
@@ -199,13 +204,16 @@ export async function handleMessages(
   if (inbound.upstreamCredential === null && inbound.identity.carrier === "auth_header") {
     const failure = noUpstreamCredential(peek.model);
     finish({
-      status: "identity_denied",
+      status: "bad_request",
       httpStatus: failure.status,
       requestedModel: peek.model,
       bytesIn: body.byteLength,
       errorType: failure.type,
     });
-    res.writeHead(failure.status, { "content-type": "application/json" });
+    res.writeHead(failure.status, {
+      "content-type": "application/json",
+      "x-should-retry": String(failure.retryable),
+    });
     res.end(anthropicError(failure.type, failure.message));
     return;
   }

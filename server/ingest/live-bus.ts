@@ -21,6 +21,8 @@ export interface LiveSubscriber {
   (records: readonly UsageRecord[]): boolean;
 }
 
+export type LiveSubscribe = (fn: LiveSubscriber, onClose?: () => void) => () => void;
+
 export interface LiveBusStats {
   readonly subscribers: number;
   readonly published: number;
@@ -29,12 +31,22 @@ export interface LiveBusStats {
 
 export interface LiveBus {
   publish(records: readonly UsageRecord[]): void;
-  subscribe(fn: LiveSubscriber): () => void;
+  subscribe: LiveSubscribe;
   stats(): LiveBusStats;
+  /**
+   * Ask every subscriber to hang up.
+   *
+   * Needed for shutdown: an SSE response never ends by itself, so
+   * `server.close()` — which waits for all connections to drain — would wait
+   * forever with a dashboard open. Under `node --watch` that presents as a
+   * restart that hangs on "Waiting for graceful termination".
+   */
+  closeAll(): void;
 }
 
 export function createLiveBus(): LiveBus {
   const subscribers = new Set<LiveSubscriber>();
+  const closers = new Map<LiveSubscriber, () => void>();
   let published = 0;
   let dropped = 0;
 
@@ -56,9 +68,25 @@ export function createLiveBus(): LiveBus {
       }
     },
 
-    subscribe(fn: LiveSubscriber): () => void {
+    subscribe(fn: LiveSubscriber, onClose?: () => void): () => void {
       subscribers.add(fn);
-      return () => void subscribers.delete(fn);
+      if (onClose !== undefined) closers.set(fn, onClose);
+      return () => {
+        subscribers.delete(fn);
+        closers.delete(fn);
+      };
+    },
+
+    closeAll(): void {
+      for (const close of [...closers.values()]) {
+        try {
+          close();
+        } catch {
+          // A socket that is already gone is the outcome we wanted anyway.
+        }
+      }
+      subscribers.clear();
+      closers.clear();
     },
 
     stats(): LiveBusStats {

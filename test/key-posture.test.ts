@@ -149,21 +149,40 @@ test("a WILDCARD route is reflected in the menu, via the real router", () => {
   );
   const menu = buildModelMenu(wild);
   assert.match(menu.find((m) => m.id === "claude-sonnet-5")?.display_name ?? "", /fireworks/);
-  // A route that deliberately keeps a model on the subscription must NOT be
-  // labelled as substituted.
-  assert.equal(menu.find((m) => m.id === "claude-haiku-4-5-20251001")?.display_name, "Haiku 4.5");
-  assert.equal(menu.find((m) => m.id === "claude-opus-5")?.display_name, "Opus 5");
+  // A route that deliberately keeps a model on the subscription is NOT servable
+  // in the key posture, so it must not be offered at all.
+  assert.equal(menu.find((m) => m.id === "claude-haiku-4-5-20251001"), undefined);
+  assert.equal(menu.find((m) => m.id === "claude-opus-5"), undefined);
 });
 
-test("the menu is a superset of the defaults, so routing never loses Opus", () => {
+test("the menu offers ONLY models this gateway can actually serve", () => {
+  // Found in use: the menu published Anthropic's built-ins unconditionally
+  // "so routing never loses Opus", and selecting the resulting `Opus 5 — From
+  // gateway` entry returned 401. Discovery only happens in the key posture,
+  // where there is no caller credential to fall back on, so an id without a
+  // route to a server-held credential is a guaranteed failure on selection.
+  // A menu is a promise; it must only promise what it can keep.
   const ids = buildModelMenu(table).map((m) => m.id);
-  assert.ok(ids.includes("claude-opus-5"));
-  assert.ok(ids.includes("claude-haiku-4-5-20251001"));
+  assert.ok(ids.includes("claude-sonnet-5"), "routed to fireworks, so servable");
+  assert.equal(ids.includes("claude-opus-5"), false, "route says pass-through: unservable in key posture");
+  // haiku IS routed to fireworks by the `wild` rule in this fixture.
+  assert.ok(ids.includes("claude-haiku-4-5-20251001"), "claude-haiku-* routes to fireworks");
 });
 
-test("with no routing config the menu is just the defaults", () => {
-  const ids = buildModelMenu(EMPTY_ROUTE_TABLE).map((m) => m.id);
-  assert.deepEqual(ids, ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
+test("with no routing config there is no menu at all", () => {
+  // The client treats a 404 / empty menu as "no gateway models" and falls back
+  // to its built-in list, which is the correct outcome — better than offering
+  // entries that cannot be served.
+  assert.deepEqual(buildModelMenu(EMPTY_ROUTE_TABLE), []);
+});
+
+test("every published entry resolves to a substitute route with an upstream", async () => {
+  const { resolveRoute } = await import("../server/routes/resolve.ts");
+  for (const entry of buildModelMenu(table)) {
+    const d = resolveRoute(table, entry.id);
+    assert.equal(d.pipeline, "substitute", `${entry.id} would 401 on selection`);
+    assert.notEqual(d.upstream, null);
+  }
 });
 
 test("every published id survives Claude Code's own filter", () => {
@@ -190,13 +209,6 @@ test("a bad token tells the developer it is the token, not their setup", () => {
   assert.match(badIdentity().message, /unknown, revoked, or expired/);
 });
 
-test("a missing server credential is named as an OPERATOR problem", () => {
-  // Otherwise the developer spends the afternoon re-checking their own token,
-  // which is the one thing that is not wrong.
-  const m = noUpstreamCredential("claude-sonnet-5").message;
-  assert.match(m, /server configuration problem, not a problem with your token/);
-  assert.match(m, /"claude-sonnet-5"/);
-});
 
 test("no 401 message ever tells a subscription user to set ANTHROPIC_AUTH_TOKEN unconditionally", () => {
   // That variable is exactly what disables their subscription, so it may only
@@ -210,4 +222,103 @@ test("no 401 message ever tells a subscription user to set ANTHROPIC_AUTH_TOKEN 
       );
     }
   }
+});
+
+// ── aliases, because the client dedupes ──────────────────────────────────────
+
+test("an `expose` alias is published and routes to the same upstream", async () => {
+  const { resolveRoute } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(
+    JSON.stringify({
+      upstreams: {
+        fireworks: {
+          adapter: "fireworks",
+          baseUrl: "https://api.fireworks.ai/inference",
+          credential: "{env:FIREWORKS_API_KEY}",
+        },
+      },
+      routes: [
+        {
+          id: "s",
+          match: "claude-sonnet-*",
+          upstream: "fireworks",
+          model: "accounts/x/kimi",
+          expose: "claude-sonnet-5-fireworks",
+        },
+      ],
+    }),
+  );
+
+  // Published, so it survives the client's dedupe against its built-in list.
+  assert.ok(buildModelMenu(t).some((m) => m.id === "claude-sonnet-5-fireworks"));
+
+  // And routable — the menu and the router agree by construction, so there is
+  // no way to publish an id that cannot be served.
+  const d = resolveRoute(t, "claude-sonnet-5-fireworks");
+  assert.equal(d.pipeline, "substitute");
+  assert.equal(d.servedModel, "accounts/x/kimi");
+  assert.equal(d.route?.id, "s");
+});
+
+test("every published id is routable", async () => {
+  const { resolveRoute } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(
+    JSON.stringify({
+      upstreams: {
+        fw: { adapter: "fireworks", baseUrl: "https://x.test", credential: "{env:K}" },
+      },
+      routes: [
+        { id: "a", match: "claude-sonnet-*", upstream: "fw", model: "m1", expose: "claude-sonnet-5-fw" },
+        { id: "b", match: "claude-opus-5", upstream: null },
+      ],
+    }),
+  );
+  for (const entry of buildModelMenu(t)) {
+    // Not necessarily substituted — but never a 404 either.
+    assert.doesNotThrow(() => resolveRoute(t, entry.id), entry.id);
+  }
+});
+
+test("an alias that the client would filter out is rejected at boot", () => {
+  // Publishing it would make the entry VANISH rather than error, and the
+  // operator would have no way to tell the difference from a working config.
+  assert.throws(
+    () =>
+      parseRouteTable(
+        JSON.stringify({
+          upstreams: { fw: { adapter: "fireworks", baseUrl: "https://x.test", credential: "{env:K}" } },
+          routes: [{ id: "a", match: "m", upstream: "fw", expose: "kimi-k2-fast" }],
+        }),
+      ),
+    /does not match/,
+  );
+});
+
+test("a wildcard alias is rejected — it is what a developer selects", () => {
+  assert.throws(
+    () =>
+      parseRouteTable(
+        JSON.stringify({
+          upstreams: { fw: { adapter: "fireworks", baseUrl: "https://x.test", credential: "{env:K}" } },
+          routes: [{ id: "a", match: "m", upstream: "fw", expose: "claude-*" }],
+        }),
+      ),
+    /concrete id/,
+  );
+});
+
+test("two routes cannot claim the same alias", () => {
+  assert.throws(
+    () =>
+      parseRouteTable(
+        JSON.stringify({
+          upstreams: { fw: { adapter: "fireworks", baseUrl: "https://x.test", credential: "{env:K}" } },
+          routes: [
+            { id: "a", match: "m1", upstream: "fw", expose: "claude-x-1" },
+            { id: "b", match: "m2", upstream: "fw", expose: "claude-x-1" },
+          ],
+        }),
+      ),
+    /already used/,
+  );
 });

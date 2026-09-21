@@ -79,13 +79,26 @@ export function handleLive(req: IncomingMessage, res: ServerResponse, bus: LiveB
   // happens to arrive — which on a quiet gateway could be hours.
   res.write(": connected\n\n");
 
-  const unsubscribe = bus.subscribe((records) => {
-    if (res.writableEnded) return false;
-    if (res.writableLength > HIGH_WATER_MARK) return false;
-    const frame: LiveFrame = { rows: records.map(toLiveRow) };
-    res.write(`event: usage\ndata: ${JSON.stringify(frame)}\n\n`);
-    return true;
-  });
+  const unsubscribe = bus.subscribe(
+    (records) => {
+      if (res.writableEnded) return false;
+      if (res.writableLength > HIGH_WATER_MARK) return false;
+      const frame: LiveFrame = { rows: records.map(toLiveRow) };
+      res.write(`event: usage\ndata: ${JSON.stringify(frame)}\n\n`);
+      return true;
+    },
+    // Shutdown hook: an event stream never ends on its own, so the server must
+    // be able to hang up on us or `server.close()` waits forever.
+    () => {
+      if (!res.writableEnded) {
+        // A comment, not an error: the client's EventSource will reconnect on
+        // its own once the new process is listening, which under --watch is
+        // about a second.
+        res.write(": server shutting down\n\n");
+        res.end();
+      }
+    },
+  );
 
   // Proxies and load balancers close idle connections; a comment costs three
   // bytes and keeps the stream alive through them.

@@ -42,6 +42,27 @@ re-checking the one thing that is not wrong.
 
 ## `GET /v1/models`
 
+**The client only asks if you tell it to.** Discovery is gated on four things,
+all of which must hold:
+
+1. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` set **on the client**
+2. `ANTHROPIC_BASE_URL` set to a non-first-party host
+3. `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` **not** set
+4. a credential in `ANTHROPIC_AUTH_TOKEN` / `apiKeyHelper` / API key
+
+```sh
+ANTHROPIC_BASE_URL=http://127.0.0.1:8787 \
+ANTHROPIC_AUTH_TOKEN=<your-fest-token> \
+CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 \
+claude
+```
+
+Without (1) the client never calls the endpoint at all — confirmed empirically
+(zero requests) and in the binary (`[Bootstrap] Skipped gateway /v1/models
+(CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY not set)`). The menu is cached at
+`~/.claude/cache/gateway-models.json`; delete it if you change routes and the
+picker looks stale.
+
 Claude Code fetches `{base}/v1/models?limit=1000` with a 3-second timeout and
 renders the result under `/model` labelled "From gateway", caching it to
 `<cache>/gateway-models.json` (0600). Fest answers from already-parsed config —
@@ -61,6 +82,33 @@ Three things this gets right, each of which took running it to find:
   fireworks`. A developer choosing "Sonnet 5" and silently getting Kimi is the
   substitution this project exists to prevent, and the model picker is the first
   place they would not notice.
+- **The menu offers only what Fest can actually serve.** The first version
+  published Anthropic's built-ins unconditionally "so routing never loses Opus".
+  That was backwards: discovery only happens in the key posture, where there is
+  no caller credential to fall back on, so an unrouted id is a guaranteed
+  failure the moment it is selected — seen in use as `Opus 5 — From gateway`
+  returning a 401. A menu is a promise; it may only promise what it can keep.
+  With nothing servable, Fest returns `404` and the client falls back to its own
+  built-in list, which is the documented behaviour.
+- **Entries are deduped against the client's built-in list**, so publishing
+  `claude-sonnet-5` collides with the built-in Sonnet and is dropped silently.
+  A route's `expose` alias (e.g. `claude-sonnet-5-kimi`) exists to survive that:
+  a distinct id appears in the picker, labelled with its destination, and routes
+  to the same place. Verified in 2.1.278: gateway options are merged only
+  `if(!s.some((he)=>uT(he,U)))`.
+
+## Errors are UI, and the client retries them
+
+Two constraints, both learned by watching real failures render:
+
+- **The message is truncated** to roughly one line. The first sentence must
+  carry the whole actionable point; anything after it may never be read.
+- **The client retries.** Its predicate is `x-should-retry` first, then
+  408/409/429/5xx, plus a token-refresh path on 401. A permanent configuration
+  problem returned as 401 produced ten escalating retries — `Retrying in 8s ·
+  attempt 5/10` — of a request that could never succeed. So "no credential
+  configured for this model" is a **400** with `x-should-retry: false`, and
+  every auth failure here carries an explicit `retryable` flag.
 
 Note the model is still told it is Claude: Claude Code's system prompt says
 "You are a Claude agent" and lists Claude model ids. (The "You are powered by

@@ -36,9 +36,23 @@ function matches(pattern: string, model: string): boolean {
   return pattern === model;
 }
 
+/**
+ * Does this route claim this model id?
+ *
+ * A route's `expose` alias is an exact match for it. The menu and the router
+ * therefore agree by construction: every id Fest publishes is an id Fest can
+ * route, and there is no way to publish one without routing it.
+ */
+function claims(route: Route, model: string): boolean {
+  return route.expose === model || matches(route.match, model);
+}
+
 /** Exact rules first, then longest pattern, then file order. */
-function rank(route: Route, index: number): [number, number, number] {
-  return [route.match.endsWith("*") ? 1 : 0, -route.match.length, index];
+function rank(route: Route, index: number, model?: string): [number, number, number] {
+  // An alias hit is always exact, however wildcard the route's own match is:
+  // the developer selected this entry by name from the menu.
+  const exact = model !== undefined && route.expose === model ? true : !route.match.endsWith("*");
+  return [exact ? 0 : 1, -route.match.length, index];
 }
 
 function better(a: [number, number, number], b: [number, number, number]): boolean {
@@ -63,8 +77,8 @@ export function resolveRoute(table: RouteTable, requestedModel: string | null): 
   let bestRank: [number, number, number] | null = null;
 
   table.routes.forEach((route, index) => {
-    if (!matches(route.match, requestedModel)) return;
-    const r = rank(route, index);
+    if (!claims(route, requestedModel)) return;
+    const r = rank(route, index, requestedModel);
     if (bestRank === null || better(r, bestRank)) {
       best = route;
       bestRank = r;

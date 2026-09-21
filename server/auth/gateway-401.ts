@@ -2,8 +2,22 @@
  * The message a developer sees when Fest cannot serve them.
  *
  * This is genuinely UI: Claude Code renders `error.message` verbatim, mid-task,
- * to someone who was trying to get work done. A 401 that says "unauthorized" is
- * a support ticket. A 401 that says which variable to set is a fix.
+ * to someone who was trying to get work done. An error that says "unauthorized"
+ * is a support ticket. One that says which variable to set is a fix.
+ *
+ * Two constraints learned by watching it render, both of which shape every
+ * message here:
+ *
+ *  1. **The client TRUNCATES the message.** It is shown on roughly one line, so
+ *     the first sentence has to carry the whole actionable point. Detail on
+ *     later lines is a bonus that may never be seen.
+ *  2. **The client RETRIES.** Its predicate is
+ *     `x-should-retry` first, then 408/409/429/5xx. A permanent configuration
+ *     problem returned as a retryable status produces ten escalating retries of
+ *     a request that cannot possibly succeed — the developer waits a minute to
+ *     be told something that was true immediately. So every failure here
+ *     carries `retryable`, and callers must send `x-should-retry: false`
+ *     accordingly.
  *
  * The messages differ by POSTURE because the remedies are opposite, and telling
  * a subscription user to set `ANTHROPIC_AUTH_TOKEN` would be actively harmful —
@@ -12,8 +26,13 @@
 
 export interface AuthFailure {
   readonly status: number;
-  readonly type: "authentication_error";
+  readonly type: "authentication_error" | "invalid_request_error";
   readonly message: string;
+  /**
+   * False for anything a retry cannot fix. Sent as `x-should-retry: false`,
+   * which the client honours ahead of its status-code rules.
+   */
+  readonly retryable: boolean;
 }
 
 const DO_NOT_SET =
@@ -25,8 +44,9 @@ export function noIdentity(baseUrl: string): AuthFailure {
   return {
     status: 401,
     type: "authentication_error",
+    retryable: false,
     message:
-      `Fest: no identity token, so this request cannot be attributed to anyone.\n` +
+      `Fest: no identity token — ask an admin for one, then set ANTHROPIC_BASE_URL=${baseUrl}/t/<your-token>.\n` +
       `Ask an admin for a token, then either:\n` +
       `  • point your base URL at it — ANTHROPIC_BASE_URL=${baseUrl}/t/<your-token>   (keeps your Claude subscription)\n` +
       `  • or set ANTHROPIC_AUTH_TOKEN=<your-token>                                   (uses this gateway's own credentials instead)\n` +
@@ -39,6 +59,7 @@ export function badIdentity(): AuthFailure {
   return {
     status: 401,
     type: "authentication_error",
+    retryable: false,
     message:
       "Fest: that identity token is not valid (unknown, revoked, or expired). " +
       "Ask an admin for a new one, then update whichever of ANTHROPIC_BASE_URL or " +
@@ -54,16 +75,20 @@ export function badIdentity(): AuthFailure {
  * own token, which is the one thing here that is not wrong.
  */
 export function noUpstreamCredential(model: string | null): AuthFailure {
+  const what = model === null ? "this model" : model;
   return {
-    status: 401,
-    type: "authentication_error",
+    // NOT 401. A 401 invites the client's token-refresh-and-retry path, and
+    // nothing about refreshing a token fixes "the server has no credential
+    // configured" — the developer just waits through ten escalating retries to
+    // be told what was true at the first attempt.
+    status: 400,
+    type: "invalid_request_error",
+    retryable: false,
+    // First sentence carries it: the message is truncated in the client.
     message:
-      `Fest: your identity is valid, but this gateway has no credential to serve ` +
-      `${model === null ? "this request" : JSON.stringify(model)} with.\n` +
-      `This is a server configuration problem, not a problem with your token — tell whoever runs Fest.\n` +
-      `They need either a route for this model with a server-held credential, or you need to use ` +
-      `your own Claude subscription: unset ANTHROPIC_AUTH_TOKEN and set ` +
-      `ANTHROPIC_BASE_URL=<fest>/t/<your-token> instead.`,
+      `Fest has no credential configured for ${what} — pick a different model, or ask whoever runs Fest to add a route for it. ` +
+      `(Your identity token is fine; this is a server configuration problem. ` +
+      `To use your own Claude subscription instead, unset ANTHROPIC_AUTH_TOKEN and set ANTHROPIC_BASE_URL=<fest>/t/<your-token>.)`,
   };
 }
 
@@ -72,6 +97,7 @@ export function noSubscriptionCredential(): AuthFailure {
   return {
     status: 401,
     type: "authentication_error",
+    retryable: false,
     message:
       "Fest: no Claude credential arrived with this request. Run `claude /login` to refresh your " +
       `subscription, and check your environment. ${DO_NOT_SET}`,

@@ -66,6 +66,21 @@ export interface Route {
   readonly upstream: string | null;
   /** Model id to send upstream. Defaults to the requested id. */
   readonly model: string | null;
+  /**
+   * An extra id to publish in the `/model` menu, which also routes here.
+   *
+   * Necessary because Claude Code DEDUPES gateway entries against its built-in
+   * list: publishing `claude-sonnet-5` collides with the built-in Sonnet and is
+   * silently dropped, so a substituted model never shows its destination in the
+   * picker. An alias like `claude-sonnet-5-fireworks` does not collide, appears
+   * under "From gateway", and makes choosing the substitute a deliberate act
+   * rather than something that happens to a developer.
+   *
+   * It must still look Anthropic-ish: the client filters ids by
+   * `/(claude|anthropic)/i` and its model-family logic keys on the
+   * `claude-{family}-…` shape.
+   */
+  readonly expose: string | null;
 }
 
 export interface RouteTable {
@@ -194,6 +209,7 @@ export function parseRouteTable(text: string): RouteTable {
   const routes: Route[] = [];
   const rawRoutes = raw["routes"];
   const seenIds = new Set<string>();
+  const exposed = new Set<string>();
   if (rawRoutes !== undefined) {
     if (!Array.isArray(rawRoutes)) {
       problems.push("`routes` must be an array");
@@ -251,7 +267,36 @@ export function parseRouteTable(text: string): RouteTable {
           return;
         }
 
-        routes.push({ id, match, upstream, model });
+        const expose = value["expose"] ?? null;
+        if (expose !== null && typeof expose !== "string") {
+          problems.push(`route ${JSON.stringify(id)}: expose must be a string or null`);
+          return;
+        }
+        if (typeof expose === "string") {
+          if (expose.includes("*")) {
+            problems.push(
+              `route ${JSON.stringify(id)}: expose must be a concrete id, not a pattern — it is what a developer selects`,
+            );
+            return;
+          }
+          // Publishing an id the client filters out is worse than not
+          // publishing: the entry vanishes rather than erroring, and the
+          // operator has no way to tell the difference.
+          if (!/(claude|anthropic)/i.test(expose)) {
+            problems.push(
+              `route ${JSON.stringify(id)}: expose ${JSON.stringify(expose)} does not match /(claude|anthropic)/i, ` +
+                `so Claude Code would silently drop it from the model menu`,
+            );
+            return;
+          }
+          if (exposed.has(expose)) {
+            problems.push(`route ${JSON.stringify(id)}: expose ${JSON.stringify(expose)} is already used by another route`);
+            return;
+          }
+          exposed.add(expose);
+        }
+
+        routes.push({ id, match, upstream, model, expose });
       });
     }
   }

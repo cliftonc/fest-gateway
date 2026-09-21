@@ -84,9 +84,15 @@ export function refuse(
       },
     ),
   );
-  res.writeHead(status, { "content-type": "application/json" });
-  // Claude Code renders this to the developer mid-task. It has to say what to
-  // do, not merely what went wrong.
+  res.writeHead(status, {
+    "content-type": "application/json",
+    // A missing server credential is not fixed by trying again. Without this
+    // the client retries ten times with backoff before showing the developer a
+    // message that was accurate on the first attempt.
+    "x-should-retry": "false",
+  });
+  // Claude Code renders this to the developer mid-task, TRUNCATED, so the
+  // first sentence has to carry the whole actionable point.
   res.end(anthropicError(type, message));
 }
 

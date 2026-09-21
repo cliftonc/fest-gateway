@@ -107,12 +107,21 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     touchToken: (id) => lastUsed.touch(id),
   });
 
+  /**
+   * How long an in-flight request may keep the process alive on shutdown.
+   *
+   * Long enough not to guillotine a developer mid-turn; short enough that
+   * `node --watch` feels like a restart rather than a hang.
+   */
+  const DRAIN_GRACE_MS = 5_000;
+
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
     log.info("shutting down", { signal });
-    server.close(() => {
+
+    const finish = (): void => {
       void sink.close().then(() => {
         retention.stop();
         lastUsed.stop();
@@ -120,7 +129,30 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
         log.info("drained", { sink: sink.stats() });
         process.exit(0);
       });
-    });
+    };
+
+    server.close(finish);
+
+    // `server.close()` stops accepting but WAITS for every open connection.
+    // An SSE stream never ends by itself, so a single open dashboard would
+    // block shutdown indefinitely — which under `node --watch` looks like a
+    // restart stuck on "Waiting for graceful termination". Hang up on the
+    // dashboards explicitly; they reconnect on their own.
+    bus.closeAll();
+    server.closeIdleConnections();
+
+    // Whatever is left is a request genuinely in flight. Give it a bounded
+    // grace period, then stop waiting: a developer's next keystroke restarting
+    // the server matters more than the tail of one turn, and the sink has
+    // already been told to drain.
+    const forced = setTimeout(() => {
+      log.warn("shutdown grace expired; closing remaining connections", {
+        afterMs: DRAIN_GRACE_MS,
+      });
+      server.closeAllConnections();
+      finish();
+    }, DRAIN_GRACE_MS);
+    forced.unref();
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
