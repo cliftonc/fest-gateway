@@ -92,3 +92,75 @@ Claude Code retried the same request 10 times against the capture server's 501.
 Two consequences: the capture server now returns a non-retryable `400
 invalid_request_error` in observe mode, and Fest's own error mapping must be
 deliberate about which statuses invite retries.
+
+---
+
+# Phase 0 results — run (e), 2026-09-21
+
+`MODE=forward`, same client config, relaying bytes verbatim to
+`https://api.anthropic.com`.
+
+## Verdict: PASSED. Anthropic accepts a relayed subscription bearer.
+
+```
+probe_ok  | HEAD /api/hello              | kinds: []
+forwarded | POST /v1/messages?beta=true  | kinds: [ANTHROPIC_OAUTH_SUBSCRIPTION]
+          | upstream: 200 | ttfb: 1330ms
+```
+
+End to end, through the relay, on a Max subscription:
+
+```
+$ claude -p "reply with exactly: fest works"
+fest works
+```
+
+**Both Phase 0 gates are now cleared.** Per-user subscription pass-through is
+viable: the client sends its OAuth bearer to a custom host, and Anthropic honours
+it. Fest can be built as designed.
+
+Caveats unchanged and still load-bearing:
+
+- This works because no host guard exists, not because it is documented. Keep the
+  version canary (re-run (a) and (e) on every Claude Code release).
+- Forcing `accept-encoding: identity` did **not** affect acceptance — the 200
+  above was served with that override in place. Good: metering can tee the
+  stream without inflating.
+- The policy question is still open and is a question for Anthropic, not for the
+  code.
+
+## Unexpected win: quota headers are handed to us
+
+Every response carries unified rate-limit headers:
+
+```
+anthropic-ratelimit-unified-status                    allowed
+anthropic-ratelimit-unified-5h-utilization            0.34
+anthropic-ratelimit-unified-5h-status                 allowed
+anthropic-ratelimit-unified-5h-reset                  1790017200
+anthropic-ratelimit-unified-7d-utilization            0.06
+anthropic-ratelimit-unified-7d-status                 allowed
+anthropic-ratelimit-unified-7d-reset                  1790596800
+anthropic-ratelimit-unified-representative-claim      five_hour
+anthropic-ratelimit-unified-fallback-percentage       0.5
+anthropic-ratelimit-unified-overage-status            rejected
+anthropic-ratelimit-unified-overage-disabled-reason   out_of_credits
+```
+
+This is precisely what the plan argued subscription users need *instead of* dollar
+figures — and it arrives free on every response, no price table required.
+
+Implications for the dashboard, which are better than designed:
+
+- **Per-developer quota consumption is directly observable**: 5h and 7d
+  utilisation as a fraction, with status and an epoch reset. "Priya is at 0.34 of
+  her 5-hour window" needs no estimation.
+- `representative-claim` says *which* window is currently binding, so the UI can
+  show the one that matters rather than guessing.
+- `overage-status` / `overage-disabled-reason` explain refusals that would
+  otherwise look like unexplained failures.
+- Forward these headers to the client verbatim so Claude Code's own `/status`
+  keeps working.
+
+Store them per request (`ratelimit_json`) and surface the latest per user. This
+replaces the "subscription usage has no meaningful cost" gap with real data.
