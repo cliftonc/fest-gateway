@@ -143,6 +143,9 @@ const server = http.createServer(async (req, res) => {
     credentials,
     credentialKinds: credentials.map((c) => c.kind),
     anthropic_version: plainHeaders["anthropic-version"],
+    session_id: plainHeaders["x-claude-code-session-id"],
+    x_app: plainHeaders["x-app"],
+    retry_count: plainHeaders["x-stainless-retry-count"],
     anthropic_beta: plainHeaders["anthropic-beta"],
     user_agent: plainHeaders["user-agent"],
     accept_encoding: plainHeaders["accept-encoding"],
@@ -150,13 +153,28 @@ const server = http.createServer(async (req, res) => {
     body: isMessages ? bodyShape(body) : { bytes: body.length },
   };
 
+  // Claude Code's runtime probes /api/hello before any inference, with no
+  // credentials. Answer it cheaply in both modes or startup degrades.
+  // Discovered in run (a); it is not part of the documented Anthropic surface.
+  if (/^\/api\/hello(\?|$)/.test(identityFromPath?.remainder ?? url)) {
+    record({ ...entry, outcome: "probe_ok" });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+    return;
+  }
+
   if (MODE === "observe") {
-    record({ ...entry, outcome: "observed_501" });
-    res.writeHead(501, { "content-type": "application/json" });
+    record({ ...entry, outcome: "observed" });
+    // Deliberately 400 / invalid_request_error, not 5xx: run (a) showed Claude
+    // Code retries a 501 ten times, which floods the log with duplicates.
+    res.writeHead(400, { "content-type": "application/json" });
     res.end(
       JSON.stringify({
         type: "error",
-        error: { type: "api_error", message: "fest capture-server: observe mode, request recorded, not forwarded" },
+        error: {
+          type: "invalid_request_error",
+          message: "fest capture-server: observe mode. Request recorded, not forwarded. Use MODE=forward to relay.",
+        },
       }),
     );
     return;

@@ -8,14 +8,18 @@ and route to different models without Claude Code knowing the difference.
 developer authenticates with their *own* subscription. Fest relays their own
 credential and never stores it. Per-user pass-through, never pooling.
 
-> Status: Phase 0. The gating experiment is built; the server is not.
-> See [docs/PHASE0.md](docs/PHASE0.md) — run it before building further.
+> Status: Phase 0. Run (a) **passed** — a real Max/Team login sends its OAuth
+> bearer to a custom base URL, confirmed empirically
+> ([results](docs/PHASE0-RESULTS.md)). Run (e) — whether Anthropic *accepts* a
+> relayed bearer — is the remaining gate. See [docs/PHASE0.md](docs/PHASE0.md).
 
 ## Why this is possible
 
 Claude Code's inference client attaches the subscription OAuth bearer with **no
 host check** against `ANTHROPIC_BASE_URL`. Point it at Fest while logged in with
-Max/Team and Fest receives `Authorization: Bearer sk-ant-oat…`.
+Max/Team and Fest receives `Authorization: Bearer sk-ant-oat…`. Confirmed both
+by reading the binary and by running it — see
+[docs/PHASE0-RESULTS.md](docs/PHASE0-RESULTS.md).
 
 Token refresh happens client-side against `api.anthropic.com`, outside
 `ANTHROPIC_BASE_URL`. So Fest **forwards and forgets**: it never stores,

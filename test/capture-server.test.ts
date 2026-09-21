@@ -58,6 +58,7 @@ test("capture server records credential kinds without leaking any value", async 
       "x-fest-token": HEADER_SECRET,
       "anthropic-version": "2023-06-01",
       "anthropic-beta": "oauth-2025-04-20",
+      "x-claude-code-session-id": "sess-under-test",
       "content-type": "application/json",
     },
     body: JSON.stringify({
@@ -68,10 +69,12 @@ test("capture server records credential kinds without leaking any value", async 
     }),
   });
 
-  // observe mode must never forward, and must say so in an Anthropic-shaped error.
-  assert.equal(res.status, 501);
+  // Observe mode must never forward, and must say so in an Anthropic-shaped
+  // error. 400/invalid_request_error specifically: run (a) showed Claude Code
+  // retries a 5xx ten times, which floods the capture log with duplicates.
+  assert.equal(res.status, 400);
   const errBody = (await res.json()) as { error?: { type?: string } };
-  assert.equal(errBody.error?.type, "api_error");
+  assert.equal(errBody.error?.type, "invalid_request_error");
 
   const raw = readFileSync(logPath, "utf8");
 
@@ -97,10 +100,38 @@ test("capture server records credential kinds without leaking any value", async 
 
   // Diagnostics we actually need must still be present.
   assert.equal(entry.anthropic_beta, "oauth-2025-04-20");
+  // Claude Code supplies its own session id; the dashboard groups on it.
+  assert.equal(entry.session_id, "sess-under-test");
   assert.equal(entry.body.model, "claude-opus-5");
   assert.equal(entry.body.stream, true);
   // cache_control must be observable — Fest has to forward it verbatim.
   assert.deepEqual(entry.body.system_cache_control, ["ephemeral"]);
   // Prompt text is capped, not stored wholesale.
   assert.ok(entry.body.system_head.length <= 200);
+});
+
+test("answers the unauthenticated /api/hello startup probe", async (t) => {
+  // Claude Code's runtime probes this before any inference, with no
+  // credentials. Found empirically in Phase 0 run (a) — it is not part of the
+  // documented Anthropic API surface, so it would otherwise be missed.
+  const dir = mkdtempSync(join(tmpdir(), "fest-probe-"));
+  const logPath = join(dir, "capture.jsonl");
+  const port = 9000 + Math.floor(Math.random() * 90);
+
+  const proc = spawn(process.execPath, ["tools/capture-server.ts"], {
+    env: { ...process.env, PORT: String(port), LOG: logPath, MODE: "observe" },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  t.after(() => {
+    proc.kill("SIGKILL");
+    rmSync(dir, { recursive: true, force: true });
+  });
+  await waitForListening(proc);
+
+  const res = await fetch(`http://127.0.0.1:${port}/api/hello`, { method: "HEAD" });
+  assert.equal(res.status, 200);
+
+  const entry = JSON.parse(readFileSync(logPath, "utf8").trim().split("\n")[0]!);
+  assert.equal(entry.outcome, "probe_ok");
+  assert.deepEqual(entry.credentialKinds, []);
 });
