@@ -3,33 +3,56 @@
  *
  * ── Visibility is enforced HERE, and nowhere else ────────────────────────────
  *
- * Every exported function takes `Scope` as its first parameter, and every SQL
- * statement in this file filters on `org_id`. There is no view, no route
- * middleware and no ORM layer that "also" checks tenancy — because the moment
- * there are two places a check can live, a future screen will be written
+ * Every exported function takes `Scope` as its first parameter after the store,
+ * and every SQL statement in this file filters on `org_id`. There is no view,
+ * no route middleware and no ORM layer that "also" checks tenancy — because the
+ * moment there are two places a check can live, a future screen will be written
  * against the one that does not check, and it will leak another org's traffic.
  *
  * The same argument applies one level down: a `member` scope is constrained to
- * its own `user_id` by `scopeClause()`, once, rather than by each query
- * remembering to. A query that forgets to call `scopeClause()` cannot compile
- * into anything useful, since it would have no WHERE fragment and no params.
+ * its own `user_id` by `scopeClause()` / `rollupSlice()`, once, rather than by
+ * each query remembering to.
  *
- * ── The rollup table's dimension convention (READ THIS) ─────────────────────
+ * ── The rollup cube, which WILL corrupt your numbers if you skim it ─────────
  *
- * `usage_hourly` is treated as a FULLY-DIMENSIONED fact table: one row per
- * (hour_start, user_id, served_model, credential_origin, cost_basis) tuple that
- * was actually observed, and `''` means "this attribute was absent on the raw
- * request" (a NULL `user_id` is an unattributed request; a NULL `served_model`
- * is a call that never got far enough to have one).
+ * `usage_hourly` is a CUBE, not a flat fact table. For every request the writer
+ * (server/store/write.ts) upserts up to four keys:
  *
- * It is NOT read as a cube with pre-aggregated "all" roll-up rows per
- * dimension. Under that alternative reading every query here would have to pin
- * the dimensions it is not grouping by to `''`, the writer would have to emit
- * 2^4 rows per hour, and — fatally — `user_id = ''` would mean both "all users"
- * and "unattributed", which is exactly the distinction an admin needs (see
- * `usageByUser`). So: totals SUM every row in range; a breakdown GROUPs BY the
- * dimension it names. If the writer ever starts emitting "all" rows, every
- * total in this file doubles, loudly — see the raw/rollup agreement test.
+ *     (user, model)   the specific cell
+ *     (user, '')      one developer, all models
+ *     ('', model)     all developers, one model
+ *     ('', '')        org totals
+ *
+ * de-duplicated, so an unattributed request or one with no resolved model
+ * contributes exactly one increment rather than two or four.
+ *
+ * Two consequences, both easy to get wrong:
+ *
+ *  1. A "bucket" is NOT one row. The primary key also carries
+ *     `credential_origin` and `cost_basis`, which are ALWAYS concrete — never
+ *     `''`. So `('', '')` for one hour is one row per (origin, basis) pair
+ *     actually observed. Every read must `SUM(...)` across them. A
+ *     `SELECT ... WHERE user_id = '' AND served_model = '' LIMIT 1` would
+ *     report a single origin's slice and look entirely plausible.
+ *     `rollupSlice()` exists so no query invents its own pinning, and no query
+ *     in this file ever pins `credential_origin` or `cost_basis`.
+ *
+ *  2. Summing across grains double-counts. An org total must pin
+ *     `user_id = '' AND served_model = ''`; a per-user breakdown must pin
+ *     `served_model = ''` and take `user_id <> ''`. Dropping either pin adds
+ *     the same traffic in two or three times.
+ *
+ *  3. `''` is overloaded: on `user_id` it means both "all users" and
+ *     "unattributed", and on `served_model` both "all models" and "never
+ *     resolved". From the rollup alone those are indistinguishable. So the
+ *     unattributed slice — which an admin genuinely needs to see, because it
+ *     means someone is using Fest without an identity token — is recovered as a
+ *     RESIDUAL: org total minus the sum of the attributed rows. That identity
+ *     holds exactly because of the writer's de-duplication. On the raw path it
+ *     comes straight from `user_id IS NULL`. Note the two tables use different
+ *     representations deliberately (`NULL` in `requests`, `''` in the rollup,
+ *     whose columns are NOT NULL and part of a primary key); both are handled
+ *     and both surface as `userId: ''`.
  */
 
 import type { UsagePayload, CostBasis } from "../../shared/types.ts";
@@ -62,28 +85,77 @@ interface Clause {
 }
 
 /**
- * The single tenancy gate.
- *
- * `alias` is the table alias so the fragment can be spliced into a join. Note
- * that for a member we emit `user_id = ?`, which in SQL also excludes NULL
- * rows — that is correct and deliberate: an unattributed request is not
- * provably the member's, and we never guess who it was. An admin sees those
- * rows; the member does not.
+ * The member's own `user_id`, or null for an org-wide scope.
  *
  * Fails closed: a `member` scope with no `userId` is a bug in the caller's
  * session handling, and answering it as though it were an admin would be the
  * exact leak this module exists to prevent.
  */
+function memberUserId(scope: Scope): string | null {
+  if (scope.role !== "member") return null;
+  if (!scope.userId) {
+    throw new Error("member scope requires a userId; refusing to widen to org-wide");
+  }
+  return scope.userId;
+}
+
+/**
+ * The tenancy gate for raw `requests`.
+ *
+ * `alias` is the table alias so the fragment can be spliced into a join. For a
+ * member we emit `user_id = ?`, which in SQL also excludes NULL rows — correct
+ * and deliberate: an unattributed request is not provably the member's, and we
+ * never guess who it was. An admin sees those rows; the member does not.
+ */
 function scopeClause(scope: Scope, alias: string): Clause {
   const params: Param[] = [scope.orgId];
   let sql = `${alias}.org_id = ?`;
-  if (scope.role === "member") {
-    if (!scope.userId) {
-      throw new Error("member scope requires a userId; refusing to widen to org-wide");
-    }
+  const uid = memberUserId(scope);
+  if (uid !== null) {
     sql += ` AND ${alias}.user_id = ?`;
-    params.push(scope.userId);
+    params.push(uid);
   }
+  return { sql, params };
+}
+
+/**
+ * Which grain of the rollup cube a query wants. See the cube note at the top of
+ * this file: choosing the wrong grain does not error, it double-counts.
+ */
+interface Grain {
+  /** True when the query GROUPs BY user; false when it wants the user total. */
+  readonly byUser: boolean;
+  /** True when the query GROUPs BY model; false when it wants the model total. */
+  readonly byModel: boolean;
+}
+
+/**
+ * THE single place that pins the rollup cube's dimensions.
+ *
+ * Deliberately never mentions `credential_origin` or `cost_basis`: those are
+ * always concrete in the cube, so a query must aggregate across them rather
+ * than pin them. That is why this returns only a WHERE fragment and the callers
+ * all use `SUM()`.
+ */
+function rollupSlice(scope: Scope, grain: Grain): Clause {
+  const params: Param[] = [scope.orgId];
+  let sql = "h.org_id = ?";
+
+  const uid = memberUserId(scope);
+  if (uid !== null) {
+    // A member's own cell exists at both (uid, '') and (uid, model), so pinning
+    // their id works at either grain.
+    sql += " AND h.user_id = ?";
+    params.push(uid);
+  } else if (grain.byUser) {
+    sql += " AND h.user_id <> ''";
+  } else {
+    sql += " AND h.user_id = ''";
+  }
+
+  if (grain.byModel) sql += " AND h.served_model <> ''";
+  else sql += " AND h.served_model = ''";
+
   return { sql, params };
 }
 
@@ -94,20 +166,20 @@ export type Source = "requests" | "usage_hourly";
 /**
  * How recent a range has to be before we bypass the rollups and read raw rows.
  *
- * Two hours, because the hourly rollup lags *by definition*: the current hour's
+ * Two hours, because the hourly rollup lags BY DEFINITION: the current hour's
  * row is still accumulating, and the metering writer flushes in batches, so the
  * most recent bucket is always incomplete. A "last 30 minutes" panel served
  * from `usage_hourly` would under-report and look like an outage. Two hours
  * gives one complete hour plus the in-flight one, which is enough that any
- * range long enough to be a *trend* reads the rollups instead — and those
- * survive raw-row retention deletion, which is the whole point of having them.
+ * range long enough to be a TREND reads the rollups instead — and those survive
+ * raw-row retention deletion, which is the whole point of having them.
  */
 export const RAW_WINDOW_MS = 2 * 60 * 60 * 1000;
 
 /**
  * ONE place decides raw-vs-rollup. Every screen calls this rather than picking
  * its own threshold, so two panels on the same page can never disagree about
- * where "today" comes from.
+ * where "today" came from.
  */
 export function chooseSource(range: TimeRange): Source {
   return range.toMs - range.fromMs <= RAW_WINDOW_MS ? "requests" : "usage_hourly";
@@ -115,7 +187,6 @@ export function chooseSource(range: TimeRange): Source {
 
 const HOUR_MS = 60 * 60 * 1000;
 
-/** Floor to the containing hour bucket. */
 function hourFloor(ms: number): number {
   return Math.floor(ms / HOUR_MS) * HOUR_MS;
 }
@@ -140,9 +211,9 @@ function rawRange(range: TimeRange): Clause {
 
 // ── Row coercion ──────────────────────────────────────────────────────────────
 //
-// `node:sqlite` hands back loosely-typed records, and REAL/INTEGER columns can
-// arrive as number or bigint depending on magnitude. These helpers are the only
-// place that deals with it, so no query body has a cast in it.
+// `node:sqlite` hands back loosely-typed records, and INTEGER columns can arrive
+// as number or bigint depending on magnitude. These helpers are the only place
+// that deals with it, so no query body has a cast in it.
 
 type Row = Record<string, unknown>;
 
@@ -162,6 +233,23 @@ function strOrNull(v: unknown): string | null {
 function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : v === null || v === undefined ? fallback : String(v);
 }
+
+/**
+ * "Is an error" — ONE definition, and it is the writer's.
+ *
+ * `server/store/write.ts` increments `usage_hourly.errors` when
+ * `status !== 'ok'`, so the raw path must use the same predicate or the same
+ * range would report different error counts depending on which side of the
+ * 2-hour threshold it fell. In particular this includes `identity_denied`
+ * (a rejected request, recorded on purpose so an admin can see auth failures)
+ * and `client_abort`, neither of which necessarily carries an `error_type`.
+ *
+ * NOTE: this means the `requests_errors` partial index — predicated on
+ * `error_type IS NOT NULL` — does not cover this predicate. Matching the
+ * numbers matters more than matching the index; see the report accompanying
+ * this module.
+ */
+const RAW_IS_ERROR = "r.status <> 'ok'";
 
 // ── Feed ──────────────────────────────────────────────────────────────────────
 
@@ -210,9 +298,8 @@ const DEFAULT_LIMIT = 50;
 export const MAX_LIMIT = 500;
 
 /**
- * `limit` arrives from a query string, so it is `unknown` in practice: coerce
- * to an integer and clamp. Not doing this is how `LIMIT ?` becomes a
- * full-table export.
+ * `limit` arrives from a query string, so treat it as hostile: coerce to an
+ * integer and clamp. Not doing this is how `LIMIT ?` becomes a table export.
  */
 function clampLimit(limit: number | undefined): number {
   const n = Math.trunc(Number(limit));
@@ -221,10 +308,10 @@ function clampLimit(limit: number | undefined): number {
 }
 
 /**
- * Sentinel for "no cursor yet". Binding a cursor on every call keeps the SQL a
- * single shape, which matters for the query plan: with `seq < ?` present SQLite
+ * Sentinel for "no cursor yet". Binding a cursor on EVERY call keeps the feed a
+ * single SQL shape, which matters for the plan: with `seq < ?` present SQLite
  * drives the query off a bounded descending rowid search, whereas the
- * cursor-less variant falls back to a temp b-tree sort.
+ * cursor-less variant falls back to a temp b-tree sort of the whole org.
  */
 const SEQ_SENTINEL = Number.MAX_SAFE_INTEGER;
 
@@ -245,9 +332,9 @@ const FEED_COLUMNS = `
   r.rl_5h_utilization, r.rl_claim, r.client_version`;
 
 /**
- * Build the feed SQL and params. Split out from `listRequests` so the query
- * plan test can assert on the exact statement the app runs, rather than on a
- * hand-written approximation of it that could drift.
+ * Build the feed SQL and params. Exported so the query-plan test can assert on
+ * the exact statement the app runs, rather than on a hand-written approximation
+ * of it that would quietly drift.
  */
 export function feedSql(scope: Scope, filter: FeedFilter): { sql: string; params: Param[] } {
   const scoped = scopeClause(scope, "r");
@@ -274,11 +361,7 @@ export function feedSql(scope: Scope, filter: FeedFilter): { sql: string; params
     where += " AND r.session_id = ?";
     params.push(filter.sessionId);
   }
-  if (filter.errorsOnly) {
-    // Matches the `requests_errors` partial index predicate exactly, which is
-    // what makes the errors view read ~1% of the table.
-    where += " AND r.error_type IS NOT NULL";
-  }
+  if (filter.errorsOnly) where += ` AND ${RAW_IS_ERROR}`;
 
   params.push(clampCursor(filter.beforeSeq));
   params.push(clampLimit(filter.limit));
@@ -332,8 +415,8 @@ function toRequestRow(row: Row): RequestRow {
  *
  * Keyset and not OFFSET: the feed is append-heavy, so between page 1 and page 2
  * new rows arrive at the top and every OFFSET page shifts underneath the
- * reader — they see a row twice and miss another. `seq < cursor` is stable
- * under concurrent inserts, and costs the same at page 1 and page 900.
+ * reader — they see one row twice and miss another entirely. `seq < cursor` is
+ * stable under concurrent inserts, and costs the same at page 1 and page 900.
  */
 export function listRequests(
   store: Store,
@@ -345,7 +428,7 @@ export function listRequests(
   const rows = (store.db.prepare(sql).all(...params) as Row[]).map(toRequestRow);
   // A short page means we reached the end; only a full page can have more
   // behind it. Handing back a cursor on a short page would make the UI issue a
-  // guaranteed-empty request on every feed.
+  // guaranteed-empty request at the bottom of every feed.
   const last = rows[rows.length - 1];
   const nextCursor = rows.length === limit && last !== undefined ? last.seq : null;
   return { rows, nextCursor };
@@ -378,17 +461,17 @@ export interface UsageTotals {
  *    that quietly omits every row we could not price, and looks completely
  *    plausible while being short. `unpriced_requests` is the receipt.
  *  - A `subscription` row is REAL USAGE WITH NO ORG SPEND. It is not $0 — $0
- *    would say "this was free", and averaging or forecasting over it would be
+ *    would say "this was free", and any average or forecast over it would be
  *    wrong. It must never be added into a dollar total, so it is excluded from
- *    the sum (`CASE ... THEN NULL`, defensive in case a notional price was ever
+ *    the sum (`CASE ... THEN NULL`, defensive in case a notional price is ever
  *    written into the column) and counted separately instead.
  *
- * With all three, a caller can render "$12.3456 (+3 n/a)" — see
- * `formatCostSum` in server/usage/cost.ts, which is the intended consumer.
+ * With all three a caller can render "$12.3456 (+3 n/a)" — see `formatCostSum`
+ * in server/usage/cost.ts, which is the intended consumer.
  */
 const RAW_AGG = `
   COUNT(*) AS requests,
-  COALESCE(SUM(CASE WHEN r.error_type IS NOT NULL THEN 1 ELSE 0 END), 0) AS errors,
+  COALESCE(SUM(CASE WHEN ${RAW_IS_ERROR} THEN 1 ELSE 0 END), 0) AS errors,
   COALESCE(SUM(r.input_tokens), 0) AS input_tokens,
   COALESCE(SUM(r.cache_read_tokens), 0) AS cache_read_tokens,
   COALESCE(SUM(r.cache_write_5m_tokens), 0) AS cache_write_5m_tokens,
@@ -420,51 +503,121 @@ const ROLLUP_AGG = `
   COALESCE(SUM(h.unpriced_requests), 0) AS unpriced_requests,
   COALESCE(SUM(h.subscription_requests), 0) AS subscription_requests`;
 
-function toTotals(row: Row): UsageTotals {
-  const usage: UsagePayload = {
-    inputTokens: num(row["input_tokens"]),
-    cacheReadTokens: num(row["cache_read_tokens"]),
-    cacheWrite5mTokens: num(row["cache_write_5m_tokens"]),
-    cacheWrite1hTokens: num(row["cache_write_1h_tokens"]),
-    outputTokens: num(row["output_tokens"]),
-    webSearches: num(row["web_searches"]),
-  };
+function makeTotals(
+  parts: {
+    requests: number;
+    errors: number;
+    usage: UsagePayload;
+    pricedCostUsd: number;
+    unpricedRequests: number;
+    subscriptionRequests: number;
+  },
+): UsageTotals {
   return {
-    requests: num(row["requests"]),
-    errors: num(row["errors"]),
-    usage,
-    pricedCostUsd: num(row["priced_cost_usd"]),
-    unpricedRequests: num(row["unpriced_requests"]),
-    subscriptionRequests: num(row["subscription_requests"]),
+    ...parts,
     // Single definition of cache hit ratio, in server/usage/pricing.ts. Do not
     // re-derive it here: the denominator is the four disjoint context buckets,
-    // and getting that wrong is the classic double-count.
-    cacheHitRatio: cacheHitRatio(usage),
+    // and getting that wrong is the classic order-of-magnitude double-count.
+    cacheHitRatio: cacheHitRatio(parts.usage),
   };
 }
 
-const EMPTY_TOTALS_ROW: Row = {};
+function toTotals(row: Row): UsageTotals {
+  return makeTotals({
+    requests: num(row["requests"]),
+    errors: num(row["errors"]),
+    usage: {
+      inputTokens: num(row["input_tokens"]),
+      cacheReadTokens: num(row["cache_read_tokens"]),
+      cacheWrite5mTokens: num(row["cache_write_5m_tokens"]),
+      cacheWrite1hTokens: num(row["cache_write_1h_tokens"]),
+      outputTokens: num(row["output_tokens"]),
+      webSearches: num(row["web_searches"]),
+    },
+    pricedCostUsd: num(row["priced_cost_usd"]),
+    unpricedRequests: num(row["unpriced_requests"]),
+    subscriptionRequests: num(row["subscription_requests"]),
+  });
+}
+
+const EMPTY_ROW: Row = {};
 
 /**
- * Build an aggregate query over whichever source `chooseSource` picked.
+ * Org total minus the attributed rows: the unattributed residual.
  *
- * `extraSelect`/`groupBy` let the breakdowns share one body, so a fix to the
- * cost arithmetic lands in every panel at once instead of five out of six.
+ * Only meaningful on the rollup path, and only because the writer de-duplicates
+ * its key set, so the `('', '')` cell is exactly the whole org. See the cube
+ * note at the top of the file.
+ */
+function subtractTotals(total: UsageTotals, parts: readonly UsageTotals[]): UsageTotals {
+  const acc = {
+    requests: total.requests,
+    errors: total.errors,
+    inputTokens: total.usage.inputTokens,
+    cacheReadTokens: total.usage.cacheReadTokens,
+    cacheWrite5mTokens: total.usage.cacheWrite5mTokens,
+    cacheWrite1hTokens: total.usage.cacheWrite1hTokens,
+    outputTokens: total.usage.outputTokens,
+    webSearches: total.usage.webSearches,
+    pricedCostUsd: total.pricedCostUsd,
+    unpricedRequests: total.unpricedRequests,
+    subscriptionRequests: total.subscriptionRequests,
+  };
+  for (const p of parts) {
+    acc.requests -= p.requests;
+    acc.errors -= p.errors;
+    acc.inputTokens -= p.usage.inputTokens;
+    acc.cacheReadTokens -= p.usage.cacheReadTokens;
+    acc.cacheWrite5mTokens -= p.usage.cacheWrite5mTokens;
+    acc.cacheWrite1hTokens -= p.usage.cacheWrite1hTokens;
+    acc.outputTokens -= p.usage.outputTokens;
+    acc.webSearches -= p.usage.webSearches;
+    acc.pricedCostUsd -= p.pricedCostUsd;
+    acc.unpricedRequests -= p.unpricedRequests;
+    acc.subscriptionRequests -= p.subscriptionRequests;
+  }
+  return makeTotals({
+    requests: acc.requests,
+    errors: acc.errors,
+    usage: {
+      inputTokens: acc.inputTokens,
+      cacheReadTokens: acc.cacheReadTokens,
+      cacheWrite5mTokens: acc.cacheWrite5mTokens,
+      cacheWrite1hTokens: acc.cacheWrite1hTokens,
+      outputTokens: acc.outputTokens,
+      webSearches: acc.webSearches,
+    },
+    // Floating-point subtraction of REAL sums can leave a -1e-17 here. Clamp,
+    // because a dashboard rendering "-$0.0000" destroys trust in every other
+    // number on the page.
+    pricedCostUsd: Math.max(acc.pricedCostUsd, 0),
+    unpricedRequests: acc.unpricedRequests,
+    subscriptionRequests: acc.subscriptionRequests,
+  });
+}
+
+interface AggOpts {
+  readonly rawSelect?: string;
+  readonly rollupSelect?: string;
+  readonly rawJoin?: string;
+  readonly rollupJoin?: string;
+  readonly rawGroupBy?: string;
+  readonly rollupGroupBy?: string;
+  readonly orderBy?: string;
+}
+
+/**
+ * Build an aggregate query over whichever source `chooseSource` picked, at the
+ * requested cube grain. Shared so a fix to the cost arithmetic lands in every
+ * panel at once instead of five out of six.
  */
 function aggregateQuery(
   scope: Scope,
   range: TimeRange,
-  opts: {
-    readonly rawSelect?: string;
-    readonly rollupSelect?: string;
-    readonly rawJoin?: string;
-    readonly rollupJoin?: string;
-    readonly groupBy?: string;
-    readonly orderBy?: string;
-  } = {},
+  grain: Grain,
+  opts: AggOpts = {},
 ): { sql: string; params: Param[] } {
-  const source = chooseSource(range);
-  if (source === "requests") {
+  if (chooseSource(range) === "requests") {
     const scoped = scopeClause(scope, "r");
     const time = rawRange(range);
     const select = opts.rawSelect ? `${opts.rawSelect}, ${RAW_AGG}` : RAW_AGG;
@@ -472,28 +625,33 @@ function aggregateQuery(
       sql: `SELECT ${select}
         FROM requests r${opts.rawJoin ?? ""}
         WHERE ${scoped.sql} AND ${time.sql}
-        ${opts.groupBy ? `GROUP BY ${opts.groupBy}` : ""}
+        ${opts.rawGroupBy ? `GROUP BY ${opts.rawGroupBy}` : ""}
         ${opts.orderBy ? `ORDER BY ${opts.orderBy}` : ""}`,
       params: [...scoped.params, ...time.params],
     };
   }
-  const scoped = scopeClause(scope, "h");
+  const slice = rollupSlice(scope, grain);
   const time = rollupRange(range);
   const select = opts.rollupSelect ? `${opts.rollupSelect}, ${ROLLUP_AGG}` : ROLLUP_AGG;
   return {
     sql: `SELECT ${select}
       FROM usage_hourly h${opts.rollupJoin ?? ""}
-      WHERE ${scoped.sql} AND ${time.sql}
-      ${opts.groupBy ? `GROUP BY ${opts.groupBy}` : ""}
+      WHERE ${slice.sql} AND ${time.sql}
+      ${opts.rollupGroupBy ? `GROUP BY ${opts.rollupGroupBy}` : ""}
       ${opts.orderBy ? `ORDER BY ${opts.orderBy}` : ""}`,
-    params: [...scoped.params, ...time.params],
+    params: [...slice.params, ...time.params],
   };
 }
 
+function runTotals(store: Store, q: { sql: string; params: Param[] }): UsageTotals {
+  const row = store.db.prepare(q.sql).get(...q.params) as Row | undefined;
+  return toTotals(row ?? EMPTY_ROW);
+}
+
+const ORG_GRAIN: Grain = { byUser: false, byModel: false };
+
 export function usageTotals(store: Store, scope: Scope, range: TimeRange): UsageTotals {
-  const { sql, params } = aggregateQuery(scope, range);
-  const row = store.db.prepare(sql).get(...params) as Row | undefined;
-  return toTotals(row ?? EMPTY_TOTALS_ROW);
+  return runTotals(store, aggregateQuery(scope, range, ORG_GRAIN));
 }
 
 /**
@@ -501,100 +659,159 @@ export function usageTotals(store: Store, scope: Scope, range: TimeRange): Usage
  *
  * LEFT JOIN, not JOIN, and it has to stay that way: `requests.user_id` is
  * nullable because a call with no identity token is recorded as unattributed
- * rather than dropped, and `usage_hourly.user_id` carries `''` for the same
- * rows. An inner join would hide them, and unattributed usage is precisely what
- * an admin needs to SEE — it means a developer is pointing Claude Code at Fest
- * without an identity token, so their spend is landing in nobody's column.
- * Those rows surface as `userId: ''` with `email: null`.
+ * rather than dropped. An inner join would hide those rows, and unattributed
+ * usage is precisely what an admin needs to SEE — it means a developer is
+ * pointing Claude Code at Fest without an identity token, so their spend is
+ * landing in nobody's column.
+ *
+ * Unattributed usage surfaces as `userId: ''` with `email: null`: directly from
+ * `user_id IS NULL` on the raw path, and as the org-total-minus-attributed
+ * residual on the rollup path, where `''` cannot be told apart from "all".
  */
 export function usageByUser(
   store: Store,
   scope: Scope,
   range: TimeRange,
 ): Array<{ userId: string; email: string | null } & UsageTotals> {
-  const { sql, params } = aggregateQuery(scope, range, {
-    rawSelect: "COALESCE(r.user_id, '') AS user_id, MAX(u.email) AS email",
-    rollupSelect: "h.user_id AS user_id, MAX(u.email) AS email",
-    // The join is scoped by org too. Belt and braces: user ids are prefixed
-    // uuids so a cross-org collision is not realistic, but a join that can only
-    // ever match within the tenant is one less thing to reason about.
-    rawJoin: " LEFT JOIN users u ON u.id = r.user_id AND u.org_id = r.org_id",
-    rollupJoin: " LEFT JOIN users u ON u.id = h.user_id AND u.org_id = h.org_id",
-    groupBy: chooseSource(range) === "requests" ? "COALESCE(r.user_id, '')" : "h.user_id",
-    orderBy: "requests DESC",
-  });
-  return (store.db.prepare(sql).all(...params) as Row[]).map((row) => ({
+  const q = usageByUserSql(scope, range);
+  const rows = (store.db.prepare(q.sql).all(...q.params) as Row[]).map((row) => ({
     userId: str(row["user_id"]),
     email: strOrNull(row["email"]),
     ...toTotals(row),
   }));
+
+  if (chooseSource(range) === "requests") return rows;
+
+  // Rollup path: recover the unattributed slice as a residual.
+  const total = usageTotals(store, scope, range);
+  const residual = subtractTotals(total, rows);
+  if (residual.requests > 0) rows.push({ userId: "", email: null, ...residual });
+  return rows;
 }
 
+/** Exported for the query-plan test; see `feedSql`. */
+export function usageByUserSql(scope: Scope, range: TimeRange): { sql: string; params: Param[] } {
+  return aggregateQuery(
+    scope,
+    range,
+    { byUser: true, byModel: false },
+    {
+      rawSelect: "COALESCE(r.user_id, '') AS user_id, MAX(u.email) AS email",
+      rollupSelect: "h.user_id AS user_id, MAX(u.email) AS email",
+      // The join is scoped by org too. User ids are prefixed uuids so a
+      // cross-org collision is not realistic, but a join that can only ever
+      // match inside the tenant is one less thing to have to reason about.
+      rawJoin: " LEFT JOIN users u ON u.id = r.user_id AND u.org_id = r.org_id",
+      rollupJoin: " LEFT JOIN users u ON u.id = h.user_id AND u.org_id = h.org_id",
+      rawGroupBy: "COALESCE(r.user_id, '')",
+      rollupGroupBy: "h.user_id",
+      orderBy: "requests DESC",
+    },
+  );
+}
+
+/**
+ * Per-model totals. A request that errored before a model was resolved has no
+ * `served_model`; it surfaces as `servedModel: ''` rather than being dropped,
+ * by the same residual trick as `usageByUser`.
+ */
 export function usageByModel(
   store: Store,
   scope: Scope,
   range: TimeRange,
 ): Array<{ servedModel: string } & UsageTotals> {
-  const { sql, params } = aggregateQuery(scope, range, {
-    rawSelect: "COALESCE(r.served_model, '') AS served_model",
-    rollupSelect: "h.served_model AS served_model",
-    groupBy: chooseSource(range) === "requests" ? "COALESCE(r.served_model, '')" : "h.served_model",
-    orderBy: "requests DESC",
-  });
-  return (store.db.prepare(sql).all(...params) as Row[]).map((row) => ({
+  const q = aggregateQuery(
+    scope,
+    range,
+    { byUser: false, byModel: true },
+    {
+      rawSelect: "COALESCE(r.served_model, '') AS served_model",
+      rollupSelect: "h.served_model AS served_model",
+      rawGroupBy: "COALESCE(r.served_model, '')",
+      rollupGroupBy: "h.served_model",
+      orderBy: "requests DESC",
+    },
+  );
+  const rows = (store.db.prepare(q.sql).all(...q.params) as Row[]).map((row) => ({
     servedModel: str(row["served_model"]),
     ...toTotals(row),
   }));
+
+  if (chooseSource(range) === "requests") return rows;
+
+  const residual = subtractTotals(usageTotals(store, scope, range), rows);
+  if (residual.requests > 0) rows.push({ servedModel: "", ...residual });
+  return rows;
 }
 
 /**
  * Per-credential-origin totals. This is the compliance view: it answers "how
- * much of our traffic ran on a server-held key" in one glance, and
+ * much of our traffic ran on a server-held key" at a glance, and
  * `distinctUsers` answers "how many people did that affect".
  *
- * `COUNT(DISTINCT user_id)` ignores NULLs on the raw path, and the rollup path
- * excludes `''` explicitly — an unattributed row is not a person we can count.
+ * `credential_origin` is never `''` in the cube, so the org grain already
+ * carries every origin and no residual is needed. `distinctUsers` does need a
+ * second, per-user-grain query though: a count of distinct users cannot be
+ * recovered from rows where the user dimension is collapsed to `''`.
  */
 export function usageByCredentialOrigin(
   store: Store,
   scope: Scope,
   range: TimeRange,
 ): Array<{ credentialOrigin: string; distinctUsers: number } & UsageTotals> {
-  const { sql, params } = aggregateQuery(scope, range, {
-    rawSelect: "r.credential_origin AS credential_origin, COUNT(DISTINCT r.user_id) AS distinct_users",
-    rollupSelect:
-      "h.credential_origin AS credential_origin, " +
-      "COUNT(DISTINCT CASE WHEN h.user_id <> '' THEN h.user_id END) AS distinct_users",
-    groupBy: chooseSource(range) === "requests" ? "r.credential_origin" : "h.credential_origin",
+  const raw = chooseSource(range) === "requests";
+  const q = aggregateQuery(scope, range, ORG_GRAIN, {
+    rawSelect:
+      "r.credential_origin AS credential_origin, COUNT(DISTINCT r.user_id) AS distinct_users",
+    rollupSelect: "h.credential_origin AS credential_origin",
+    rawGroupBy: "r.credential_origin",
+    rollupGroupBy: "h.credential_origin",
     orderBy: "requests DESC",
   });
-  return (store.db.prepare(sql).all(...params) as Row[]).map((row) => ({
+  const rows = (store.db.prepare(q.sql).all(...q.params) as Row[]).map((row) => ({
     credentialOrigin: str(row["credential_origin"]),
+    // COUNT(DISTINCT user_id) ignores NULLs, so an unattributed request is not
+    // counted as a person. It is visible in `usageByUser` instead.
     distinctUsers: num(row["distinct_users"]),
     ...toTotals(row),
   }));
+  if (raw) return rows;
+
+  const slice = rollupSlice(scope, { byUser: true, byModel: false });
+  const time = rollupRange(range);
+  const counts = new Map<string, number>();
+  const countRows = store.db
+    .prepare(
+      `SELECT h.credential_origin AS credential_origin,
+              COUNT(DISTINCT h.user_id) AS distinct_users
+       FROM usage_hourly h WHERE ${slice.sql} AND ${time.sql}
+       GROUP BY h.credential_origin`,
+    )
+    .all(...slice.params, ...time.params) as Row[];
+  for (const row of countRows) counts.set(str(row["credential_origin"]), num(row["distinct_users"]));
+  return rows.map((row) => ({ ...row, distinctUsers: counts.get(row.credentialOrigin) ?? 0 }));
 }
 
 /**
  * Hourly series for a sparkline. Gaps are gaps: an hour with no traffic is
- * absent rather than zero-filled, because the caller knows the range and can
- * fill it, whereas this layer cannot tell "no traffic" from "outside retention".
+ * absent rather than zero-filled, because the caller knows the range it asked
+ * for, whereas this layer cannot tell "no traffic" from "outside retention".
  */
 export function usageSeries(
   store: Store,
   scope: Scope,
   range: TimeRange,
 ): Array<{ hourStart: number } & UsageTotals> {
-  const raw = chooseSource(range) === "requests";
-  const { sql, params } = aggregateQuery(scope, range, {
+  const q = aggregateQuery(scope, range, ORG_GRAIN, {
     // Integer division truncates in SQLite, which is exactly the bucketing we
     // want, and it keeps the arithmetic in epoch ms with no timezone anywhere.
     rawSelect: `(r.started_at / ${HOUR_MS}) * ${HOUR_MS} AS hour_start`,
     rollupSelect: "h.hour_start AS hour_start",
-    groupBy: raw ? `r.started_at / ${HOUR_MS}` : "h.hour_start",
+    rawGroupBy: `r.started_at / ${HOUR_MS}`,
+    rollupGroupBy: "h.hour_start",
     orderBy: "hour_start ASC",
   });
-  return (store.db.prepare(sql).all(...params) as Row[]).map((row) => ({
+  return (store.db.prepare(q.sql).all(...q.params) as Row[]).map((row) => ({
     hourStart: num(row["hour_start"]),
     ...toTotals(row),
   }));
@@ -611,9 +828,10 @@ export function usageSeries(
  * rows for a range, which is honest — a breakdown we cannot compute must not be
  * approximated.
  *
- * "Error" is defined as `error_type IS NOT NULL`, matching the
- * `requests_errors` partial index predicate and the rollup's `errors` column,
- * so the count here and the count in `usageTotals` cannot drift apart.
+ * `errorType` is genuinely nullable: a `client_abort` or an `identity_denied`
+ * rejection is a non-ok status that may carry no error type at all, and those
+ * are exactly the rows an admin wants to see (an identity_denied run means
+ * someone's token is wrong).
  */
 export function errorBreakdown(
   store: Store,
@@ -624,11 +842,10 @@ export function errorBreakdown(
   const time = rawRange(range);
   const sql = `SELECT r.error_type AS error_type, r.http_status AS http_status, COUNT(*) AS count
     FROM requests r
-    WHERE ${scoped.sql} AND ${time.sql} AND r.error_type IS NOT NULL
+    WHERE ${scoped.sql} AND ${time.sql} AND ${RAW_IS_ERROR}
     GROUP BY r.error_type, r.http_status
-    ORDER BY count DESC, error_type ASC`;
-  const params = [...scoped.params, ...time.params];
-  return (store.db.prepare(sql).all(...params) as Row[]).map((row) => ({
+    ORDER BY count DESC, r.error_type ASC`;
+  return (store.db.prepare(sql).all(...scoped.params, ...time.params) as Row[]).map((row) => ({
     errorType: strOrNull(row["error_type"]),
     httpStatus: numOrNull(row["http_status"]),
     count: num(row["count"]),
@@ -638,10 +855,14 @@ export function errorBreakdown(
 // ── Latency ───────────────────────────────────────────────────────────────────
 
 /**
- * Lower edges of the fixed histogram buckets from `usage_hourly`: <1s, <3s,
- * <10s, <30s, <60s, >=60s. The last bucket is open-ended on purpose — a
- * gateway relaying agent turns has a genuinely unbounded tail, and inventing an
- * upper edge for it would invent a percentile.
+ * Lower and upper edges of the fixed histogram buckets from `usage_hourly`:
+ * <1s, <3s, <10s, <30s, <60s, >=60s. Must stay in step with `latencyBucket` in
+ * server/store/write.ts — the writer decides which bucket a row lands in, this
+ * decides what that bucket means.
+ *
+ * The last bucket is open-ended on purpose: a gateway relaying agent turns has
+ * a genuinely unbounded tail, and inventing an upper edge for it would invent a
+ * percentile.
  */
 const LAT_LOWER = [0, 1000, 3000, 10_000, 30_000, 60_000] as const;
 const LAT_UPPER = [1000, 3000, 10_000, 30_000, 60_000, null] as const;
@@ -654,8 +875,8 @@ export interface LatencySummary {
   readonly avgTtfbMs: number | null;
   /**
    * EXACT (nearest-rank) on the raw path; an INTERPOLATION from histogram
-   * buckets on the rollup path. See `latencySummary`. Never label the bucketed
-   * figure as exact in a UI.
+   * buckets on the rollup path. Never label the bucketed figure as exact in a
+   * UI — see `interpolatePercentile`.
    */
   readonly p50Ms: number | null;
   readonly p95Ms: number | null;
@@ -666,16 +887,16 @@ export interface LatencySummary {
  * Linear interpolation of a percentile within the fixed buckets.
  *
  * Why buckets exist at all: PERCENTILES DO NOT MERGE ACROSS ROLLUP ROWS. You
- * cannot average two hours' p95s, or pick the larger, and get the p95 of the
+ * cannot average two hours' p95s, or take the larger, and get the p95 of the
  * two hours combined — the information needed to do that was thrown away when
- * each hour was summarised. Bucket COUNTS, on the other hand, simply add. So
- * the rollup stores counts and we reconstruct a percentile from them.
+ * each hour was summarised. Bucket COUNTS, by contrast, simply add. So the
+ * rollup stores counts and we reconstruct a percentile from them.
  *
  * The reconstruction assumes latency is uniformly distributed inside each
  * bucket, which it is not. The result is therefore an ESTIMATE with a
  * resolution no finer than the bucket it lands in: a p95 reported as 24.5s
  * really means "somewhere in 10s–30s". Present it as approximate. If you need
- * an exact p95, shorten the range so `chooseSource` reads raw rows.
+ * an exact p95, shorten the range until `chooseSource` reads raw rows.
  *
  * A percentile landing in the open-ended top bucket returns that bucket's lower
  * edge (60s) as a FLOOR, because there is no upper edge to interpolate toward.
@@ -699,8 +920,8 @@ export function interpolatePercentile(buckets: readonly number[], p: number): nu
     }
     cumulative += inBucket;
   }
-  // Unreachable while total > 0, but returning the top edge beats returning
-  // null and having a caller read it as "no data".
+  // Unreachable while total > 0; returning the top edge still beats returning
+  // null, which a caller would read as "no data".
   return LAT_LOWER[LAT_LOWER.length - 1] ?? null;
 }
 
@@ -712,14 +933,23 @@ function exactPercentile(sorted: readonly number[], p: number): number | null {
   return sorted[idx] ?? null;
 }
 
+/** Bucket a raw duration. Mirrors `latencyBucket` in write.ts. */
+function bucketOf(durationMs: number): number {
+  for (let b = 0; b < LAT_BUCKET_COUNT; b += 1) {
+    const upper = LAT_UPPER[b];
+    if (upper === null || upper === undefined || durationMs < upper) return b;
+  }
+  return LAT_BUCKET_COUNT - 1;
+}
+
 export function latencySummary(store: Store, scope: Scope, range: TimeRange): LatencySummary {
   if (chooseSource(range) === "requests") {
     const scoped = scopeClause(scope, "r");
     const time = rawRange(range);
     const params = [...scoped.params, ...time.params];
-    // Pulling the durations out and sorting in JS is fine here *because* this
-    // branch only runs for ranges of <= RAW_WINDOW_MS. Do not reuse it for a
-    // long range: that is what the bucketed branch below is for.
+    // Pulling the durations out and sorting in JS is acceptable here *because*
+    // this branch only ever runs for a range of <= RAW_WINDOW_MS. Do not reuse
+    // it for a long range: that is what the bucketed branch below is for.
     const durations = (
       store.db
         .prepare(
@@ -739,14 +969,7 @@ export function latencySummary(store: Store, scope: Scope, range: TimeRange): La
 
     const buckets = new Array<number>(LAT_BUCKET_COUNT).fill(0);
     for (const d of durations) {
-      let i = LAT_BUCKET_COUNT - 1;
-      for (let b = 0; b < LAT_BUCKET_COUNT; b += 1) {
-        const upper = LAT_UPPER[b];
-        if (upper === null || upper === undefined || d < upper) {
-          i = b;
-          break;
-        }
-      }
+      const i = bucketOf(d);
       buckets[i] = (buckets[i] ?? 0) + 1;
     }
 
@@ -754,6 +977,8 @@ export function latencySummary(store: Store, scope: Scope, range: TimeRange): La
       count: num(agg?.["count"]),
       avgDurationMs: numOrNull(agg?.["avg_duration"]),
       maxDurationMs: numOrNull(agg?.["max_duration"]),
+      // AVG ignores NULLs, so this is already an average over requests that
+      // actually produced a first byte rather than one diluted by aborts.
       avgTtfbMs: numOrNull(agg?.["avg_ttfb"]),
       p50Ms: exactPercentile(durations, 0.5),
       p95Ms: exactPercentile(durations, 0.95),
@@ -761,7 +986,9 @@ export function latencySummary(store: Store, scope: Scope, range: TimeRange): La
     };
   }
 
-  const scoped = scopeClause(scope, "h");
+  // Org grain: summing per-user or per-model cells as well would count every
+  // request two to four times over. See the cube note at the top of the file.
+  const slice = rollupSlice(scope, ORG_GRAIN);
   const time = rollupRange(range);
   const row = store.db
     .prepare(
@@ -773,11 +1000,11 @@ export function latencySummary(store: Store, scope: Scope, range: TimeRange): La
               COALESCE(SUM(h.lat_b0), 0) AS b0, COALESCE(SUM(h.lat_b1), 0) AS b1,
               COALESCE(SUM(h.lat_b2), 0) AS b2, COALESCE(SUM(h.lat_b3), 0) AS b3,
               COALESCE(SUM(h.lat_b4), 0) AS b4, COALESCE(SUM(h.lat_b5), 0) AS b5
-       FROM usage_hourly h WHERE ${scoped.sql} AND ${time.sql}`,
+       FROM usage_hourly h WHERE ${slice.sql} AND ${time.sql}`,
     )
-    .get(...scoped.params, ...time.params) as Row | undefined;
+    .get(...slice.params, ...time.params) as Row | undefined;
 
-  const r = row ?? EMPTY_TOTALS_ROW;
+  const r = row ?? EMPTY_ROW;
   const count = num(r["count"]);
   const ttfbCount = num(r["ttfb_count"]);
   const buckets = [
@@ -822,10 +1049,11 @@ export interface QuotaSnapshot {
 /**
  * Latest observed quota snapshot per user.
  *
- * For a developer on a subscription this — not dollars — is the scarce
+ * For a developer on a subscription THIS — not dollars — is the scarce
  * resource, so it gets its own panel. There is no time range: the question is
  * always "where does everyone stand right now", and the answer is whatever the
- * most recent request that actually CARRIED quota headers reported.
+ * most recent request that actually CARRIED quota headers reported. Quota lives
+ * only on raw rows, so this view is bounded by raw-row retention.
  *
  * Requests with no quota headers are skipped rather than surfaced as nulls. A
  * failed or aborted call has no headers, and letting one overwrite a real
@@ -874,19 +1102,4 @@ export function latestQuotaByUser(store: Store, scope: Scope): QuotaSnapshot[] {
     overageStatus: strOrNull(row["rl_overage_status"]),
     overageReason: strOrNull(row["rl_overage_reason"]),
   }));
-}
-
-/**
- * Per-user rollup SQL, exposed for the query plan test. See `feedSql` for why
- * the test asserts on the real statement rather than a copy of it.
- */
-export function usageByUserSql(scope: Scope, range: TimeRange): { sql: string; params: Param[] } {
-  return aggregateQuery(scope, range, {
-    rawSelect: "COALESCE(r.user_id, '') AS user_id, MAX(u.email) AS email",
-    rollupSelect: "h.user_id AS user_id, MAX(u.email) AS email",
-    rawJoin: " LEFT JOIN users u ON u.id = r.user_id AND u.org_id = r.org_id",
-    rollupJoin: " LEFT JOIN users u ON u.id = h.user_id AND u.org_id = h.org_id",
-    groupBy: chooseSource(range) === "requests" ? "COALESCE(r.user_id, '')" : "h.user_id",
-    orderBy: "requests DESC",
-  });
 }

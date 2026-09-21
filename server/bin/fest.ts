@@ -21,6 +21,7 @@ import type { Store } from "../store/db.ts";
 import { ensureOrg, ensureUser, findUserByEmail } from "../store/bootstrap.ts";
 import { createToken, listTokens, revokeToken, resolveToken, createLastUsedTracker } from "../store/tokens.ts";
 import { createRequestWriter } from "../store/write.ts";
+import { startRetention, DEFAULT_RETENTION } from "../store/retention.ts";
 
 const out = (s: string): void => void process.stdout.write(s + "\n");
 
@@ -39,6 +40,9 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
   const org = ensureOrg(store);
   const writer = createRequestWriter(store);
   const lastUsed = createLastUsedTracker(store);
+  // Hourly sweep, on a timer rather than at boot: a restart loop must not turn
+  // into a delete loop.
+  const retention = startRetention(store, DEFAULT_RETENTION);
 
   await mkdir(dirname(cfg.usageLogPath), { recursive: true });
   const sink = createUsageSink({
@@ -64,6 +68,7 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     log.info("shutting down", { signal });
     server.close(() => {
       void sink.close().then(() => {
+        retention.stop();
         lastUsed.stop();
         store.close();
         log.info("drained", { sink: sink.stats() });
@@ -79,6 +84,7 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     out(
       `fest: http://${cfg.host}:${cfg.port}  ->  ${cfg.upstreamBaseUrl}\n` +
         `  db: ${cfg.dbPath}   identity required: ${cfg.requireIdentity}\n` +
+        `  retention: requests ${DEFAULT_RETENTION.requestDays}d, rollups ${DEFAULT_RETENTION.rollupDays}d\n` +
         `point Claude Code at it with:\n` +
         `  ANTHROPIC_BASE_URL=http://${cfg.host}:${cfg.port}/t/<your-token>\n` +
         `and do NOT set ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN (either disables your subscription)`,

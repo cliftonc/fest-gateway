@@ -149,13 +149,11 @@ test("rollups always equal raw rows for a mixed batch", (t) => {
   assert.equal(totals["requests"], raw["requests"]);
   assert.equal(totals["input"], raw["input"]);
   assert.equal(Number(totals["output"] ?? 0) >= 0, true);
-  assert.equal(
-    store.db
-      .prepare(
-        `SELECT sum(cache_read_tokens) AS c FROM usage_hourly
-          WHERE org_id = ? AND user_id = '' AND served_model = ''`,
-      )
-      .get(orgId).c,
-    raw["cacheRead"],
-  );
+  const rolledCacheRead = store.db
+    .prepare(
+      `SELECT sum(cache_read_tokens) AS c FROM usage_hourly
+        WHERE org_id = ? AND user_id = '' AND served_model = ''`,
+    )
+    .get(orgId) as { c: number | null };
+  assert.equal(rolledCacheRead.c, raw["cacheRead"]);
 });
