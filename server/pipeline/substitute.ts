@@ -230,7 +230,21 @@ export async function handleSubstitute(
     const priced = priceUsage(decision.servedModel, usage, false);
     const streamErr = acc.streamError();
 
-    let status: RequestStatus = "ok";
+    /**
+     * A non-2xx upstream response is an ERROR even when the body streamed
+     * cleanly.
+     *
+     * Missed until a real 400 came back from a provider mid-stream and was
+     * recorded as `ok`: the status was derived only from client aborts and
+     * in-band SSE error events, so an upstream that refuses BEFORE emitting any
+     * events produced a tidy, successful-looking record. The effect is an error
+     * rate that reads as zero precisely when a provider is rejecting
+     * everything.
+     *
+     * Ordering: a client abort still wins, because the developer walking away
+     * is the more specific fact about what happened.
+     */
+    let status: RequestStatus = response.ok ? "ok" : "upstream_error";
     if (result.clientAborted) status = "client_abort";
     else if (streamErr) status = "stream_error";
 

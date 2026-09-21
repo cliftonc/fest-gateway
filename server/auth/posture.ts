@@ -11,10 +11,18 @@
  *     forwarded upstream. It arrives as a URL path prefix (`/t/<token>/…`) or as
  *     an `X-Fest-Token` header.
  *
- * The identity token cannot ride in `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`:
- * setting either of those makes Claude Code silently abandon subscription auth,
- * so the developer's Max token never arrives and we bill the org instead. Hence
- * the two out-of-band carriers.
+ * On the SUBSCRIPTION posture the identity token cannot ride in
+ * `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`: setting either of those makes
+ * Claude Code silently abandon subscription auth, so the developer's Max token
+ * never arrives and we bill the org instead. Hence the two out-of-band
+ * carriers.
+ *
+ * On the KEY posture that objection does not apply — there is no subscription
+ * left to protect — so a Fest token may also arrive as
+ * `Authorization: Bearer fest_…`. Whichever position it arrives in, a Fest
+ * token is IDENTITY and is never forwarded upstream. Relaying our own bearer to
+ * Anthropic would authenticate nothing and disclose a credential that can
+ * impersonate a developer on this gateway.
  */
 
 import type { Posture, Identity } from "../../shared/types.ts";
@@ -63,6 +71,12 @@ export function parseIdentityPath(url: string): { token: string | null; remainde
   return { token, remainder: `${path === "" ? "/" : path}${suffix}` };
 }
 
+/** `Bearer xyz` -> `xyz`; anything else unchanged. */
+function stripBearer(raw: string): string {
+  const match = /^Bearer\s+(.*)$/i.exec(raw.trim());
+  return (match ? (match[1] ?? "") : raw).trim();
+}
+
 function headerValue(
   headers: Readonly<Record<string, string | string[] | undefined>>,
   name: string,
@@ -89,6 +103,16 @@ export function detectInbound(
   headers: Readonly<Record<string, string | string[] | undefined>>,
 ): InboundAuth {
   let upstreamCredential: CredentialInfo | null = null;
+  /**
+   * A Fest token found in an upstream-credential position.
+   *
+   * It is pulled OUT of that position rather than left there: everything
+   * downstream treats `upstreamCredential` as "the thing to forward", and our
+   * own identity token must never be forwarded. Recording it here keeps the
+   * loop's preference order intact while removing it from the forward path.
+   */
+  let tokenFromAuthHeader: string | null = null;
+
   for (const name of UPSTREAM_CREDENTIAL_HEADERS) {
     const raw = headerValue(headers, name);
     if (raw === null) continue;
@@ -96,6 +120,15 @@ export function detectInbound(
     // An empty or whitespace-only header is the same as no credential; fall
     // through so a present-but-blank `authorization` does not mask `x-api-key`.
     if (info.kind === "EMPTY") continue;
+
+    if (info.kind === "FEST_IDENTITY_TOKEN") {
+      // Identity, not an upstream credential. Keep scanning: a developer could
+      // conceivably present a Fest token AND a real provider key, and the key
+      // is still the thing to forward.
+      tokenFromAuthHeader ??= stripBearer(raw);
+      continue;
+    }
+
     upstreamCredential = info;
     break;
   }
@@ -107,8 +140,22 @@ export function detectInbound(
   const fromHeader = headerValue(headers, "x-fest-token");
   // Path wins: it is the form we hand developers (`ANTHROPIC_BASE_URL=…/t/<tok>`),
   // so if both are present the URL is the deliberate one.
-  const identityToken = fromPath.token ?? (fromHeader !== null && fromHeader.trim() !== "" ? fromHeader.trim() : null);
-  const carrier = fromPath.token !== null ? "path" : identityToken !== null ? "header" : "none";
+  //
+  // Precedence: path, then X-Fest-Token, then the auth header. The path form is
+  // what we hand developers, so when several are present the URL is the
+  // deliberate one; the auth header is last because it is the only position a
+  // token can end up in by accident (a developer pasting a key into the wrong
+  // variable).
+  const headerToken = fromHeader !== null && fromHeader.trim() !== "" ? fromHeader.trim() : null;
+  const identityToken = fromPath.token ?? headerToken ?? tokenFromAuthHeader;
+  const carrier: Identity["carrier"] =
+    fromPath.token !== null
+      ? "path"
+      : headerToken !== null
+        ? "header"
+        : tokenFromAuthHeader !== null
+          ? "auth_header"
+          : "none";
 
   const identity: Identity = {
     carrier,

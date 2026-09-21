@@ -21,6 +21,9 @@ import type { UsageSink } from "../ingest/sink.ts";
 import type { FestConfig } from "../config.ts";
 import type { Store } from "../store/db.ts";
 import { handleApi } from "../api/routes.ts";
+import { handleModels } from "../api/models.ts";
+import { handleCountTokens } from "../pipeline/count-tokens.ts";
+import { detectInbound } from "../auth/posture.ts";
 import type { LiveBus } from "../ingest/live-bus.ts";
 import { createStaticHost } from "./static.ts";
 import { fileURLToPath } from "node:url";
@@ -135,6 +138,28 @@ export function createServer(deps: ServerDeps): Server {
             await new Promise((r) => setTimeout(r, 1000));
           }
           res.end();
+          return;
+        }
+
+        // The model menu Claude Code renders under `/model`, labelled "From
+        // gateway". Only ever reached in the key posture — discovery needs a
+        // credential in ANTHROPIC_AUTH_TOKEN, which is what disables
+        // subscription auth in the first place.
+        if (path === "/v1/models" && (method === "GET" || method === "HEAD")) {
+          const inm = req.headers["if-none-match"];
+          handleModels(res, ctx.routes, Array.isArray(inm) ? inm[0] : inm);
+          return;
+        }
+
+        // Relayed, never metered: it consumes no tokens, and counting it would
+        // drag every per-request average toward zero.
+        if (path === "/v1/messages/count_tokens" && method === "POST") {
+          const inbound = detectInbound(url, req.headers);
+          await handleCountTokens(req, res, {
+            upstreamBaseUrl: deps.config.upstreamBaseUrl,
+            path: inbound.effectivePath,
+            posture: inbound.posture,
+          });
           return;
         }
 

@@ -95,8 +95,19 @@ export interface RateLimitSnapshot {
  */
 export type Posture = "subscription" | "key";
 
-/** How the caller's Fest identity token reached us. */
-export type IdentityCarrier = "path" | "header" | "none";
+/**
+ * How the caller's Fest identity token reached us.
+ *
+ * `auth_header` is the KEY posture: the developer set
+ * `ANTHROPIC_AUTH_TOKEN=fest_…`, so the token arrives as
+ * `Authorization: Bearer fest_…`. That is a deliberate trade, not a fallback —
+ * setting that variable is exactly what makes Claude Code abandon subscription
+ * auth, so this carrier and a pass-through subscription are mutually exclusive
+ * by construction. It buys the things a key-posture gateway can do that a
+ * subscription one cannot: a server-published model menu, and no per-developer
+ * setup beyond one environment variable.
+ */
+export type IdentityCarrier = "path" | "header" | "auth_header" | "none";
 
 export interface Identity {
   readonly carrier: IdentityCarrier;

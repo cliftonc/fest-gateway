@@ -34,6 +34,7 @@ import { priceUsage } from "../usage/pricing.ts";
 import { pipeWithTee, beginStream } from "../http/pipe.ts";
 import { isSubscriptionCredential } from "../secret/fingerprint.ts";
 import type { UsageSink } from "../ingest/sink.ts";
+import { badIdentity, noIdentity, noUpstreamCredential } from "../auth/gateway-401.ts";
 import { log } from "../log.ts";
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -58,6 +59,8 @@ export interface PassthroughContext {
    * and "nothing configured" are different operational states.
    */
   readonly routeId?: string | null | undefined;
+  /** Used only to write an actionable 401. Never used for routing. */
+  readonly publicBaseUrl?: string | undefined;
 }
 
 function credentialOrigin(hasSubscription: boolean, hasKey: boolean): CredentialOrigin {
@@ -163,10 +166,7 @@ export async function handleMessages(
   };
 
   if (presentedToken !== null && resolved === null) {
-    denyIdentity(
-      "Fest: that identity token is not valid (unknown, revoked, or expired). " +
-        "Ask an admin for a new one, then update ANTHROPIC_BASE_URL.",
-    );
+    denyIdentity(badIdentity().message);
     return;
   }
 
@@ -174,11 +174,7 @@ export async function handleMessages(
   // Without it usage cannot be attributed, which for a team gateway defeats
   // the point — so a team deployment sets FEST_REQUIRE_IDENTITY=1.
   if (ctx.requireIdentity && resolved === null) {
-    denyIdentity(
-      "Fest: no identity token. Point ANTHROPIC_BASE_URL at https://<fest>/t/<your-token>, " +
-        "or set ANTHROPIC_CUSTOM_HEADERS=\"X-Fest-Token: <your-token>\". " +
-        "Do not set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN: either one disables your Claude subscription.",
-    );
+    denyIdentity(noIdentity(ctx.publicBaseUrl ?? "https://<fest>").message);
     return;
   }
 
@@ -194,6 +190,25 @@ export async function handleMessages(
   const body = bodyOrTooLarge;
   const peek = peekRequest(body);
   const isSubscription = inbound.upstreamCredential !== null && isSubscriptionCredential(inbound.upstreamCredential);
+
+  // Key posture with a Fest token and nothing to pay with: the credential
+  // position holds our OWN token, which we will not forward, and no route
+  // claimed this model. Anthropic's 401 would be accurate but useless — it
+  // would describe a credential the developer never sent. Checked here, after
+  // the body, so the message can name the model that has no home.
+  if (inbound.upstreamCredential === null && inbound.identity.carrier === "auth_header") {
+    const failure = noUpstreamCredential(peek.model);
+    finish({
+      status: "identity_denied",
+      httpStatus: failure.status,
+      requestedModel: peek.model,
+      bytesIn: body.byteLength,
+      errorType: failure.type,
+    });
+    res.writeHead(failure.status, { "content-type": "application/json" });
+    res.end(anthropicError(failure.type, failure.message));
+    return;
+  }
 
   const target = new URL(inbound.effectivePath, ctx.upstreamBaseUrl);
   const headers = buildUpstreamHeaders(req.headers, {
@@ -287,7 +302,21 @@ export async function handleMessages(
     const priced = priceUsage(peek.model, usage, isSubscription);
     const streamErr = acc.streamError();
 
-    let status: RequestStatus = "ok";
+    /**
+     * A non-2xx upstream response is an ERROR even when the body streamed
+     * cleanly.
+     *
+     * Missed until a real 400 came back from a provider mid-stream and was
+     * recorded as `ok`: the status was derived only from client aborts and
+     * in-band SSE error events, so an upstream that refuses BEFORE emitting any
+     * events produced a tidy, successful-looking record. The effect is an error
+     * rate that reads as zero precisely when a provider is rejecting
+     * everything.
+     *
+     * Ordering: a client abort still wins, because the developer walking away
+     * is the more specific fact about what happened.
+     */
+    let status: RequestStatus = upstream.ok ? "ok" : "upstream_error";
     if (result.clientAborted) status = "client_abort";
     else if (streamErr) status = "stream_error";
 
