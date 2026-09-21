@@ -20,10 +20,25 @@ const STATUS_TONE: Readonly<Record<string, "ok" | "warn" | "bad" | "muted">> = {
   bad_request: "warn",
 };
 
+/**
+ * Render the credential trail as a title attribute.
+ *
+ * The whole point of `credentialsConsidered` is that a substitution is never
+ * silent, so the reasoning has to be reachable from the row it explains rather
+ * than from a log an admin would have to know to go and read.
+ */
+function credentialTrail(row: FeedRowWire): string | undefined {
+  if (row.credentialsConsidered.length === 0) return undefined;
+  return row.credentialsConsidered
+    .map((c) => `${c.source}: ${c.result}${c.reason === undefined ? "" : ` — ${c.reason}`}`)
+    .join("\n");
+}
+
 export const FEED_HEAD = [
   "Time",
   "Developer",
   "Model",
+  "Route",
   "Credential",
   "Status",
   "Context",
@@ -58,7 +73,33 @@ export function FeedTable({
               userLabel(row.userId)
             )}
           </td>
-          <td className="mono">{modelLabel(row.servedModel)}</td>
+          <td className="mono">
+            {modelLabel(row.servedModel)}
+            {/* A rewritten model is the substitution a developer can actually
+                feel — they asked for one thing and got another — so it is shown
+                inline rather than hidden behind a tooltip. */}
+            {row.requestedModel !== null && row.requestedModel !== row.servedModel && (
+              <>
+                {" "}
+                <Muted title={`requested ${row.requestedModel}`}>
+                  ← {modelLabel(row.requestedModel)}
+                </Muted>
+              </>
+            )}
+          </td>
+          <td>
+            {row.pipeline === "substitute" ? (
+              <Pill tone="warn" title="Served by another provider on a server-held credential.">
+                {row.routeId ?? "substituted"}
+              </Pill>
+            ) : row.routeId !== null ? (
+              <Muted title="A route matched and deliberately kept this on the pass-through path.">
+                {row.routeId}
+              </Muted>
+            ) : (
+              <Muted>—</Muted>
+            )}
+          </td>
           <td>
             <Pill
               tone={
@@ -68,6 +109,7 @@ export function FeedTable({
                     ? "warn"
                     : "muted"
               }
+              title={credentialTrail(row)}
             >
               {originLabel(row.credentialOrigin)}
             </Pill>

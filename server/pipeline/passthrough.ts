@@ -17,7 +17,12 @@
 
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { UsageRecord, RequestStatus, CredentialOrigin } from "../../shared/types.ts";
+import type {
+  UsageRecord,
+  RequestStatus,
+  CredentialOrigin,
+  CredentialAttempt,
+} from "../../shared/types.ts";
 import { EMPTY_USAGE } from "../../shared/types.ts";
 import { detectInbound } from "../auth/posture.ts";
 import { buildUpstreamHeaders, buildDownstreamHeaders, parseRateLimit } from "../http/headers.ts";
@@ -46,6 +51,13 @@ export interface PassthroughContext {
   readonly resolveIdentity: (raw: string | null) => { tokenId: string; userId: string } | null;
   /** Coalesced last-used tracking; must not write per request. */
   readonly touchToken?: ((tokenId: string) => void) | undefined;
+  /**
+   * Route that chose this path, when a route explicitly kept the request on
+   * pass-through. Null when no route matched and the default applied — the
+   * dashboard shows those differently, because "deliberately not substituted"
+   * and "nothing configured" are different operational states.
+   */
+  readonly routeId?: string | null | undefined;
 }
 
 function credentialOrigin(hasSubscription: boolean, hasKey: boolean): CredentialOrigin {
@@ -58,6 +70,13 @@ export async function handleMessages(
   req: IncomingMessage,
   res: ServerResponse,
   ctx: PassthroughContext,
+  /**
+   * Bytes already read from the request, when the dispatcher had to read them
+   * to see the model id. The stream can only be consumed once, so re-reading
+   * here would hang. Still the SAME bytes — the dispatcher inspects a copy and
+   * never rewrites on this path.
+   */
+  preRead?: Uint8Array<ArrayBuffer>,
 ): Promise<void> {
   const startedAt = Date.now();
   const id = randomUUID();
@@ -65,6 +84,18 @@ export async function handleMessages(
 
   const sessionId = headerValue(req, "x-claude-code-session-id");
   const clientVersion = headerValue(req, "user-agent");
+
+  const credentialsConsidered: readonly CredentialAttempt[] =
+    inbound.upstreamCredential === null
+      ? [{ source: "inbound", result: "missing", reason: "no credential on the request" }]
+      : [
+          {
+            source: isSubscriptionCredential(inbound.upstreamCredential)
+              ? "inbound_subscription"
+              : "inbound_key",
+            result: "used",
+          },
+        ];
 
   // Resolve identity before anything else, but note the two failure modes are
   // NOT the same:
@@ -109,6 +140,13 @@ export async function handleMessages(
       upstreamRequestId: null,
       rateLimit: null,
       clientVersion,
+      pipeline: "passthrough",
+      routeId: ctx.routeId ?? null,
+      // Recorded even though this path never chooses: a record that says
+      // "the caller's own subscription served this, nothing else was tried"
+      // is what makes the absence of a substitution provable rather than
+      // assumed.
+      credentialsConsidered,
       ...partial,
     };
     // Fire and forget: metering must never delay or fail a request.
@@ -144,7 +182,7 @@ export async function handleMessages(
     return;
   }
 
-  const bodyOrTooLarge = await readBodyBytes(req, MAX_BODY_BYTES);
+  const bodyOrTooLarge = preRead ?? (await readBodyBytes(req, MAX_BODY_BYTES));
   if (isTooLarge(bodyOrTooLarge)) {
     const type = "invalid_request_error";
     finish({ status: "bad_request", httpStatus: statusForErrorType(type) });

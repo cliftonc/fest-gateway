@@ -47,6 +47,9 @@ function rec(over: Partial<UsageRecord>): UsageRecord {
     upstreamRequestId: "rid",
     rateLimit: null,
     clientVersion: "claude-cli/2.1.278",
+    pipeline: "passthrough",
+    routeId: null,
+    credentialsConsidered: [{ source: "inbound_subscription", result: "used" }],
     ...over,
   };
 }

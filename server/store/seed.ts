@@ -174,6 +174,19 @@ export function generateRecords(opts: SeedOptions): UsageRecord[] {
           }
         : null,
       clientVersion: "2.1.278",
+      pipeline: credentialOrigin === "fallback_server" ? "substitute" : "passthrough",
+      routeId: credentialOrigin === "fallback_server" ? "demo-substitute" : null,
+      credentialsConsidered:
+        credentialOrigin === "fallback_server"
+          ? [
+              {
+                source: "inbound_subscription",
+                result: "skipped",
+                reason: "a Claude subscription credential is only valid at Anthropic",
+              },
+              { source: "env:DEMO_PROVIDER_KEY", result: "used" },
+            ]
+          : [{ source: `inbound_${subscription ? "subscription" : "key"}`, result: "used" }],
     });
   }
 

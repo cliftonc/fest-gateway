@@ -45,6 +45,9 @@ function record(id: string): UsageRecord {
     upstreamRequestId: "req_x",
     rateLimit: null,
     clientVersion: "2.1.278",
+    pipeline: "passthrough",
+    routeId: null,
+    credentialsConsidered: [{ source: "inbound_subscription", result: "used" }],
   };
 }
 

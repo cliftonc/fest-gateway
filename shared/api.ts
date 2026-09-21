@@ -16,7 +16,7 @@
  * total.
  */
 
-import type { UsagePayload, CostBasis } from "./types.ts";
+import type { UsagePayload, CostBasis, CredentialAttempt } from "./types.ts";
 
 export interface TimeRangeWire {
   /** Inclusive, epoch ms. */
@@ -68,6 +68,15 @@ export interface RequestRowWire {
   readonly rl5hUtilization: number | null;
   readonly rlClaim: string | null;
   readonly clientVersion: string | null;
+  /** `passthrough` or `substitute`. */
+  readonly pipeline: string;
+  /** The route that decided, or null when the default pass-through applied. */
+  readonly routeId: string | null;
+  /**
+   * Every credential considered, in order. Present on every row — an empty
+   * array means the row predates routing, not that nothing was considered.
+   */
+  readonly credentialsConsidered: readonly CredentialAttempt[];
 }
 
 export interface LatencySummaryWire {
@@ -156,6 +165,53 @@ export interface ErrorsResponse {
 
 export interface QuotaResponse {
   readonly rows: readonly QuotaSnapshotWire[];
+}
+
+// ── Routing ───────────────────────────────────────────────────────────────────
+
+/**
+ * The routing table as the dashboard sees it.
+ *
+ * Credentials appear as REFERENCES and a resolution status — never values.
+ * That is not a redaction step applied on the way out; there is no value in the
+ * table to redact. The config holds `{env:NAME}`, so the most this endpoint
+ * could ever disclose is the NAME of an environment variable, which is what an
+ * operator needs in order to fix a broken route.
+ *
+ * `credentialPresent` is worth the extra work: "this route is configured but
+ * its key is not set on the server" is the single most common way routing is
+ * broken, and without it the only way to find out is to send a request and
+ * read the refusal.
+ */
+export interface UpstreamWire {
+  readonly id: string;
+  readonly adapter: string;
+  readonly baseUrl: string;
+  /** e.g. `env:FIREWORKS_API_KEY`. A name, never a secret. */
+  readonly credentialSource: string;
+  /** Whether that reference currently resolves to something non-empty. */
+  readonly credentialPresent: boolean;
+  /** What this adapter changes about a request, for the operator's benefit. */
+  readonly transforms: readonly string[];
+}
+
+export interface RouteWire {
+  readonly id: string;
+  readonly match: string;
+  /** Null means "deliberately kept on the pass-through path". */
+  readonly upstream: string | null;
+  /** Null means the requested model id is sent unchanged. */
+  readonly model: string | null;
+}
+
+export interface RoutingResponse {
+  /** Content hash of the loaded table; doubles as an ETag. */
+  readonly version: string;
+  /** False when no routing config is loaded — everything passes through. */
+  readonly enabled: boolean;
+  readonly upstreams: readonly UpstreamWire[];
+  /** In evaluation order: exact rules first, then longest wildcard, then file order. */
+  readonly routes: readonly RouteWire[];
 }
 
 /**

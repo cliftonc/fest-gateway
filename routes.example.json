@@ -1,0 +1,22 @@
+{
+  "upstreams": {
+    "fireworks": {
+      "adapter": "fireworks",
+      "baseUrl": "https://api.fireworks.ai/inference",
+      "credential": "{env:FIREWORKS_API_KEY}"
+    }
+  },
+  "routes": [
+    {
+      "id": "keep-opus-on-subscription",
+      "match": "claude-opus-5",
+      "upstream": null
+    },
+    {
+      "id": "oss-to-fireworks",
+      "match": "gpt-oss-*",
+      "upstream": "fireworks",
+      "model": "accounts/fireworks/models/gpt-oss-120b"
+    }
+  ]
+}

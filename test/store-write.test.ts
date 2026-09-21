@@ -63,6 +63,9 @@ function rec(over: RecOverrides = {}): UsageRecord {
     upstreamRequestId: "upstream_1",
     rateLimit: null,
     clientVersion: "claude-cli/2.1.278",
+    pipeline: "passthrough",
+    routeId: null,
+    credentialsConsidered: [{ source: "inbound_subscription", result: "used" }],
   };
   return { ...base, ...over } as unknown as UsageRecord;
 }

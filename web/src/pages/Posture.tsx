@@ -18,6 +18,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Range } from "../lib/api.ts";
 import { Card, Meter, Muted, Pill, QueryState, Stat, StatRow, Table } from "../components/ui.tsx";
 import { Legend, ORIGIN_COLORS, ORIGIN_ORDER, PostureChart } from "../components/charts.tsx";
+import { RoutingCard } from "../components/RoutingCard.tsx";
 import { ORIGIN_LABELS, costTotal, num, originLabel, ratio, relative, tokens, userLabel, when } from "../lib/format.ts";
 
 /** Above this, a developer is close enough to the wall to warn about. */
@@ -133,6 +134,8 @@ export function PosturePage({ range }: { range: Range }): React.JSX.Element {
           </Table>
         </QueryState>
       </Card>
+
+      <RoutingCard />
 
       <Card
         title="Rate-limit headroom, per developer"

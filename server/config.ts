@@ -19,6 +19,15 @@ export interface FestConfig {
    * team, where unattributed usage defeats the purpose.
    */
   readonly requireIdentity: boolean;
+  /**
+   * Path to the routing table, or null for "everything passes through".
+   *
+   * Null is the DEFAULT and the safe one: with no config, Fest can only ever
+   * relay a request to Anthropic on the caller's own credential. Substitution
+   * — org spend, a different vendor seeing the traffic — requires an operator
+   * to have written a file saying so.
+   */
+  readonly routesPath: string | null;
 }
 
 function intFromEnv(name: string, fallback: number): number {
@@ -61,6 +70,7 @@ export function loadConfig(): FestConfig {
     dbPath: (process.env.FEST_DB ?? "./data/fest.db").trim(),
     logLevel: level,
     requireIdentity: boolFromEnv("FEST_REQUIRE_IDENTITY", false),
+    routesPath: (process.env.FEST_ROUTES ?? "").trim() || null,
   };
 }
 

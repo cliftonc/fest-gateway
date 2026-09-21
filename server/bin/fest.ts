@@ -29,6 +29,9 @@ import { createToken, listTokens, revokeToken, resolveToken, createLastUsedTrack
 import { createRequestWriter } from "../store/write.ts";
 import { startRetention, DEFAULT_RETENTION } from "../store/retention.ts";
 import { seed, existingRequestCount, isDefaultDatabase } from "../store/seed.ts";
+import { parseRouteTable, EMPTY_ROUTE_TABLE } from "../routes/table.ts";
+import type { RouteTable } from "../routes/table.ts";
+import { readFile } from "node:fs/promises";
 
 const out = (s: string): void => void process.stdout.write(s + "\n");
 
@@ -42,7 +45,31 @@ async function withStore(cfg: FestConfig): Promise<Store> {
   return store;
 }
 
+/**
+ * Load and validate the routing table at BOOT, not on first use.
+ *
+ * A config error must stop the process here, where an operator is watching,
+ * rather than surfacing as a failed request to a developer hours later. And a
+ * table that fails to parse must never degrade to "no routing": that would
+ * silently send substituted traffic back onto developers' subscriptions, which
+ * is the exact silent-billing-substitution failure this phase is designed
+ * against.
+ */
+async function loadRoutes(cfg: FestConfig): Promise<RouteTable> {
+  if (cfg.routesPath === null) return EMPTY_ROUTE_TABLE;
+  const text = await readFile(cfg.routesPath, "utf8");
+  const table = parseRouteTable(text);
+  log.info("routing table loaded", {
+    path: cfg.routesPath,
+    version: table.version,
+    routes: table.routes.length,
+    upstreams: [...table.upstreams.keys()],
+  });
+  return table;
+}
+
 async function cmdServe(cfg: FestConfig): Promise<void> {
+  const routes = await loadRoutes(cfg);
   const store = await withStore(cfg);
   const org = ensureOrg(store);
   const writer = createRequestWriter(store);
@@ -73,6 +100,7 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     config: cfg,
     sink,
     bus,
+    routes,
     orgId: org.id,
     store,
     resolveIdentity: (raw) => resolveToken(store, raw),
@@ -103,6 +131,11 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
       `fest: http://${cfg.host}:${cfg.port}  ->  ${cfg.upstreamBaseUrl}\n` +
         `  db: ${cfg.dbPath}   identity required: ${cfg.requireIdentity}\n` +
         `  retention: requests ${DEFAULT_RETENTION.requestDays}d, rollups ${DEFAULT_RETENTION.rollupDays}d\n` +
+        `  routing: ${
+          routes.routes.length === 0
+            ? "none — every request passes through on the caller's own credential"
+            : `${routes.routes.length} route(s) via ${cfg.routesPath} (v${routes.version})`
+        }\n` +
         `point Claude Code at it with:\n` +
         `  ANTHROPIC_BASE_URL=http://${cfg.host}:${cfg.port}/t/<your-token>\n` +
         `and do NOT set ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN (either disables your subscription)`,

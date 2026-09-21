@@ -55,7 +55,7 @@
  *     and both surface as `userId: ''`.
  */
 
-import type { UsagePayload, CostBasis } from "../../shared/types.ts";
+import type { UsagePayload, CostBasis, CredentialAttempt } from "../../shared/types.ts";
 import type { Cost } from "../usage/cost.ts";
 import { cacheHitRatio } from "../usage/pricing.ts";
 import type { Store } from "./db.ts";
@@ -280,6 +280,10 @@ export interface RequestRow {
   readonly rl5hUtilization: number | null;
   readonly rlClaim: string | null;
   readonly clientVersion: string | null;
+  readonly pipeline: string;
+  /** Null when no route matched and the default pass-through applied. */
+  readonly routeId: string | null;
+  readonly credentialsConsidered: readonly CredentialAttempt[];
 }
 
 export interface FeedFilter {
@@ -374,6 +378,23 @@ export function feedSql(scope: Scope, filter: FeedFilter): { sql: string; params
   return { sql, params };
 }
 
+/**
+ * Never let a malformed audit note break the feed.
+ *
+ * The column is JSON written by our own writer, so this should not fail — but
+ * a feed that 500s because one historical row has odd content is a worse
+ * outcome than a row that shows no credential detail.
+ */
+function parseConsidered(value: unknown): CredentialAttempt[] {
+  if (typeof value !== "string" || value === "") return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as CredentialAttempt[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function toRequestRow(row: Row): RequestRow {
   return {
     seq: num(row["seq"]),
@@ -407,6 +428,12 @@ function toRequestRow(row: Row): RequestRow {
     rl5hUtilization: numOrNull(row["rl_5h_utilization"]),
     rlClaim: strOrNull(row["rl_claim"]),
     clientVersion: strOrNull(row["client_version"]),
+    pipeline: str(row["pipeline"], "passthrough"),
+    routeId: strOrNull(row["route_id"]),
+    // Stored as JSON because it is an audit note read whole. A row written
+    // before migration 003 has '[]', which reads correctly as "nothing
+    // recorded" rather than as a wrong answer.
+    credentialsConsidered: parseConsidered(row["credentials_considered"]),
   };
 }
 

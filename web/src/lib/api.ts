@@ -15,6 +15,7 @@ import type {
   OverviewResponse,
   QuotaResponse,
   RequestsResponse,
+  RoutingResponse,
   UsersResponse,
 } from "../../../shared/api.ts";
 
@@ -67,6 +68,8 @@ export const api = {
   errors: (r: Range): Promise<ErrorsResponse> => get("errors", rangeParams(r)),
   /** No range: the question is always "where does everyone stand right now". */
   quota: (): Promise<QuotaResponse> => get("quota", {}),
+  /** Config, not traffic — no range, and it only changes on a restart. */
+  routing: (): Promise<RoutingResponse> => get("routing", {}),
   requests: (f: FeedFilters, before?: number | null): Promise<RequestsResponse> =>
     get("requests", {
       userId: f.userId,

@@ -132,6 +132,43 @@ export type CredentialOrigin = "inbound_subscription" | "inbound_key" | "fallbac
  */
 export type CostBasis = "subscription" | "list" | "none";
 
+// ── Credential resolution ─────────────────────────────────────────────────────
+
+/**
+ * What happened to one candidate credential.
+ *
+ * `source` is a REFERENCE, never a value: `"inbound_subscription"`,
+ * `"env:FIREWORKS_API_KEY"`, `"upstream:fireworks"`. There is no shape here a
+ * secret could occupy, which is the point — this record is written to the
+ * database and rendered in a browser.
+ */
+export type CredentialResult =
+  /** This is the credential the request was sent with. At most one per record. */
+  | "used"
+  /** Configured, but nothing was there to read. */
+  | "missing"
+  /** Present but refused upstream (401/403). */
+  | "rejected"
+  /** Not eligible on this path — e.g. an inbound bearer on a substitute route. */
+  | "skipped";
+
+export interface CredentialAttempt {
+  readonly source: string;
+  readonly result: CredentialResult;
+  /** Why, in a few words, when the result alone is not self-explanatory. */
+  readonly reason?: string | undefined;
+}
+
+/**
+ * Which pipeline served a request.
+ *
+ * `passthrough` forwards bytes verbatim to Anthropic on the caller's own
+ * credential. `substitute` sends a rewritten request to another provider on a
+ * credential the SERVER holds — which is org spend, and a different vendor
+ * seeing the traffic. The two are never allowed to blur into one another.
+ */
+export type Pipeline = "passthrough" | "substitute";
+
 export interface UsageRecord {
   readonly id: string;
   readonly startedAt: number;
@@ -182,4 +219,22 @@ export interface UsageRecord {
   readonly rateLimit: RateLimitSnapshot | null;
 
   readonly clientVersion: string | null;
+
+  readonly pipeline: Pipeline;
+  /**
+   * The route that made the decision, or null when no route matched and the
+   * default (passthrough) applied.
+   */
+  readonly routeId: string | null;
+
+  /**
+   * Every credential considered for this request, in the order considered.
+   *
+   * Recorded on EVERY record, including the trivial single-candidate case.
+   * Silent credential substitution is a billing incident: a developer believes
+   * their own subscription paid, the org is invoiced instead, and nothing
+   * anywhere says so. An always-present list means "which credential paid for
+   * this, and what else was tried" is a lookup rather than an investigation.
+   */
+  readonly credentialsConsidered: readonly CredentialAttempt[];
 }

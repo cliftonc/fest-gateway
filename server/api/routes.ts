@@ -27,8 +27,13 @@ import {
 } from "../store/queries.ts";
 import type { UsageSink } from "../ingest/sink.ts";
 import type { LiveBus } from "../ingest/live-bus.ts";
+import type { RouteTable } from "../routes/table.ts";
+import { evaluationOrder } from "../routes/resolve.ts";
+import { ADAPTER_TRANSFORMS } from "../adapters/registry.ts";
+import type { SecretResolver } from "../credentials/provider.ts";
 import { handleLive } from "./live.ts";
 import type {
+  RoutingResponse,
   OverviewResponse,
   RequestsResponse,
   UsersResponse,
@@ -69,6 +74,8 @@ export interface ApiDeps {
   readonly sink: UsageSink;
   readonly bus: LiveBus;
   readonly orgId: string;
+  readonly routes: RouteTable;
+  readonly secrets: SecretResolver;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -157,6 +164,30 @@ export function handleApi(
       return true;
 
     // For a subscription developer this, not cost, is the scarce resource.
+    // The routing table, so an operator can see what Fest will do without
+    // reading the config file on the server. No secret can appear here: the
+    // table holds references, not values.
+    case "/api/routing":
+      json(res, 200, {
+        version: deps.routes.version,
+        enabled: deps.routes.routes.length > 0,
+        upstreams: [...deps.routes.upstreams.values()].map((u) => ({
+          id: u.id,
+          adapter: u.adapter,
+          baseUrl: u.baseUrl,
+          credentialSource: u.credential.source,
+          credentialPresent: deps.secrets.resolve(u.credential) !== null,
+          transforms: ADAPTER_TRANSFORMS[u.adapter] ?? [],
+        })),
+        routes: evaluationOrder(deps.routes).map((r) => ({
+          id: r.id,
+          match: r.match,
+          upstream: r.upstream,
+          model: r.model,
+        })),
+      } satisfies RoutingResponse);
+      return true;
+
     case "/api/quota":
       json(res, 200, { rows: latestQuotaByUser(deps.store, scope) } satisfies QuotaResponse);
       return true;

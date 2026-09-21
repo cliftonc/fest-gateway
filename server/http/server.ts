@@ -11,8 +11,12 @@ import http from "node:http";
 import type { Server } from "node:http";
 import { parseIdentityPath } from "../auth/posture.ts";
 import { anthropicError } from "./errors.ts";
-import { handleMessages } from "../pipeline/passthrough.ts";
-import type { PassthroughContext } from "../pipeline/passthrough.ts";
+import { dispatchMessages } from "../pipeline/dispatch.ts";
+import type { DispatchContext } from "../pipeline/dispatch.ts";
+import { EMPTY_ROUTE_TABLE } from "../routes/table.ts";
+import type { RouteTable } from "../routes/table.ts";
+import { createEnvResolver } from "../credentials/provider.ts";
+import type { SecretResolver } from "../credentials/provider.ts";
 import type { UsageSink } from "../ingest/sink.ts";
 import type { FestConfig } from "../config.ts";
 import type { Store } from "../store/db.ts";
@@ -31,6 +35,10 @@ export interface ServerDeps {
   readonly store: Store;
   readonly resolveIdentity: (raw: string | null) => { tokenId: string; userId: string } | null;
   readonly touchToken?: ((tokenId: string) => void) | undefined;
+  /** Model routing. Absent means everything passes through, which is the default. */
+  readonly routes?: RouteTable | undefined;
+  /** Injected so tests can resolve credentials without touching process.env. */
+  readonly secrets?: SecretResolver | undefined;
 }
 
 function pathnameOf(url: string): string {
@@ -47,13 +55,15 @@ export function createServer(deps: ServerDeps): Server {
     log.info("dashboard bundle not built; serving API only", { expected: WEB_DIST });
   }
 
-  const ctx: PassthroughContext = {
+  const ctx: DispatchContext = {
     upstreamBaseUrl: deps.config.upstreamBaseUrl,
     sink: deps.sink,
     requireIdentity: deps.config.requireIdentity,
     orgId: deps.orgId,
     resolveIdentity: deps.resolveIdentity,
     touchToken: deps.touchToken,
+    routes: deps.routes ?? EMPTY_ROUTE_TABLE,
+    secrets: deps.secrets ?? createEnvResolver(),
   };
 
   const server = http.createServer((req, res) => {
@@ -81,6 +91,8 @@ export function createServer(deps: ServerDeps): Server {
             sink: deps.sink,
             bus: deps.bus,
             orgId: deps.orgId,
+            routes: ctx.routes,
+            secrets: ctx.secrets,
           })
         ) {
           return;
@@ -127,7 +139,7 @@ export function createServer(deps: ServerDeps): Server {
         }
 
         if (path === "/v1/messages" && method === "POST") {
-          await handleMessages(req, res, ctx);
+          await dispatchMessages(req, res, ctx);
           return;
         }
 
