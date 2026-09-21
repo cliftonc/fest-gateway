@@ -13,6 +13,7 @@
  */
 
 import type { Store } from "./db.ts";
+import { sweepSessions } from "../auth/session.ts";
 import { log } from "../log.ts";
 
 export interface RetentionPolicy {
@@ -89,6 +90,12 @@ export function startRetention(
   const timer = setInterval(() => {
     try {
       runRetention(store, policy);
+      // Dead dashboard sessions ride the same sweep. They are not governed by
+      // the retention policy — an expired session hash proves nothing, and the
+      // record of who signed in lives in the audit log — so they are simply
+      // deleted once they can no longer authenticate anything.
+      const sessions = sweepSessions(store);
+      if (sessions > 0) log.info("sessions swept", { deleted: sessions });
     } catch (err) {
       // Housekeeping must never take the gateway down.
       log.warn("retention failed", { error: String(err).slice(0, 200) });

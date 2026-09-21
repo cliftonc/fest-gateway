@@ -7,8 +7,9 @@
  * builds SQL, so a forgotten filter in a route cannot leak another tenant's
  * data.
  *
- * NOTE: unauthenticated. Fine bound to loopback, NOT fine on a shared host —
- * dashboard auth lands with the admin work. Do not expose this port before then.
+ * Authentication is decided before this file runs (see auth/guard.ts) and the
+ * result arrives as `scope`. Every query takes that scope explicitly, so there
+ * is no ambient "current org" a handler could forget to apply.
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -32,6 +33,7 @@ import { evaluationOrder } from "../routes/resolve.ts";
 import { ADAPTER_TRANSFORMS } from "../adapters/registry.ts";
 import type { SecretResolver } from "../credentials/provider.ts";
 import { handleLive } from "./live.ts";
+import { listAudit } from "../store/audit.ts";
 import type {
   RoutingResponse,
   OverviewResponse,
@@ -40,6 +42,7 @@ import type {
   ModelsResponse,
   ErrorsResponse,
   QuotaResponse,
+  AuditResponse,
 } from "../../shared/api.ts";
 
 const DEFAULT_RANGE_MS = 24 * 3_600_000;
@@ -73,9 +76,14 @@ export interface ApiDeps {
   readonly store: Store;
   readonly sink: UsageSink;
   readonly bus: LiveBus;
-  readonly orgId: string;
   readonly routes: RouteTable;
   readonly secrets: SecretResolver;
+  /**
+   * Who is asking, resolved from the session cookie by the guard. Not an orgId
+   * plus an assumed role: the role decides what the audit endpoint returns, and
+   * a caller must never be able to widen it by choosing a query parameter.
+   */
+  readonly scope: Scope;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -106,11 +114,7 @@ export function handleApi(
   const url = new URL(req.url ?? "/", "http://fest.local");
   const params = url.searchParams;
   const range = parseRange(params);
-
-  // Single-org for now. When dashboard auth lands, the scope comes from the
-  // session rather than being assumed — which is the only change needed here,
-  // because every query already takes it explicitly.
-  const scope: Scope = { orgId: deps.orgId, role: "admin" };
+  const scope = deps.scope;
 
   // SSE, so it owns its own response lifecycle and must not fall through to
   // the JSON writer below.
@@ -187,6 +191,21 @@ export function handleApi(
         })),
       } satisfies RoutingResponse);
       return true;
+
+    // Admin-only. A member can see the traffic they are part of; who was
+    // granted console access, and whose login failed, is not that.
+    case "/api/audit": {
+      if (scope.role === "member") {
+        json(res, 403, { error: "admin access required" });
+        return true;
+      }
+      const opts = {
+        ...(intParam(params, "limit") !== undefined ? { limit: intParam(params, "limit") } : {}),
+        ...(intParam(params, "before") !== undefined ? { beforeSeq: intParam(params, "before") } : {}),
+      };
+      json(res, 200, { rows: listAudit(deps.store, scope.orgId, opts) } satisfies AuditResponse);
+      return true;
+    }
 
     case "/api/quota":
       json(res, 200, { rows: latestQuotaByUser(deps.store, scope) } satisfies QuotaResponse);

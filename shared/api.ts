@@ -233,3 +233,38 @@ export interface LiveFrame {
 
 /** Any row the feed can render, from either source. */
 export type FeedRowWire = RequestRowWire | LiveRowWire;
+
+/** `/api/auth/me`, and the body of a successful `/api/auth/login`. */
+export interface MeResponse {
+  readonly authenticated: boolean;
+  readonly user?: {
+    readonly id: string;
+    readonly email: string;
+    readonly role: "owner" | "admin" | "member";
+  };
+  /**
+   * True when nobody has run `fest admin create` yet. The dashboard shows setup
+   * instructions instead of a login form, because there is nothing to log in
+   * with — and the API is only reachable at all because it is bound to
+   * loopback.
+   */
+  readonly setupRequired: boolean;
+}
+
+/** One administrative action. Never contains a credential or any prompt text. */
+export interface AuditRowWire {
+  readonly seq: number;
+  readonly at: number;
+  readonly actorUserId: string | null;
+  /** The email the actor presented — kept even if the user row is deleted. */
+  readonly actorLabel: string;
+  readonly action: string;
+  readonly target: string;
+  readonly outcome: "ok" | "denied" | "error";
+  readonly detail: Record<string, unknown>;
+  readonly ip: string;
+}
+
+export interface AuditResponse {
+  readonly rows: readonly AuditRowWire[];
+}

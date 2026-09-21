@@ -7,6 +7,11 @@
  *   fest token create <email> [name]  mint an identity token (shown once)
  *   fest token list
  *   fest token revoke <token-id>
+ *   fest admin create <email> [--role owner|admin|member] [--password-stdin]
+ *                                     grant dashboard sign-in (password shown once)
+ *   fest admin list
+ *   fest admin passwd <email> [--password-stdin]
+ *   fest admin disable <email> | fest admin enable <email>
  *   fest seed [--requests N] [--hours N] [--force]
  *                                     synthetic traffic, for looking at the
  *                                     dashboard without a live session
@@ -26,6 +31,11 @@ import { openStore, migrate } from "../store/db.ts";
 import type { Store } from "../store/db.ts";
 import { ensureOrg, ensureUser, findUserByEmail } from "../store/bootstrap.ts";
 import { createToken, listTokens, revokeToken, resolveToken, createLastUsedTracker } from "../store/tokens.ts";
+import { grantDashboardAccess, hasAnyOwner, normaliseEmail } from "../auth/accounts.ts";
+import { revokeUserSessions } from "../auth/session.ts";
+import { isLoopbackHost } from "../auth/guard.ts";
+import { generatePassword } from "../auth/password.ts";
+import { recordAudit } from "../store/audit.ts";
 import { createRequestWriter } from "../store/write.ts";
 import { startRetention, DEFAULT_RETENTION } from "../store/retention.ts";
 import { seed, existingRequestCount, isDefaultDatabase } from "../store/seed.ts";
@@ -78,6 +88,27 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     cfg.routesPath === null ? null : watchRoutes(cfg.routesPath, routes);
   const store = await withStore(cfg);
   const org = ensureOrg(store);
+
+  /**
+   * Refuse to serve an unauthenticated dashboard off loopback.
+   *
+   * The API exposes every developer's usage. On 127.0.0.1 that is a
+   * single-developer trial and asking for a password first would be friction
+   * for no one's benefit; on any other interface it is a data leak waiting for
+   * someone to find the port. Failing at boot — where an operator is watching —
+   * beats failing as a quiet exposure nobody notices.
+   */
+  if (!isLoopbackHost(cfg.host) && !hasAnyOwner(store, org.id)) {
+    store.close();
+    throw new Error(
+      `refusing to listen on ${cfg.host} with no owner account.\n` +
+        "The dashboard would serve every developer's usage to anyone who finds the port.\n" +
+        "Create one first:\n" +
+        "  node server/bin/fest.ts admin create you@corp.test\n" +
+        "or bind to loopback (FEST_HOST=127.0.0.1) for a single-developer trial.",
+    );
+  }
+
   const writer = createRequestWriter(store);
   const lastUsed = createLastUsedTracker(store);
   // Hourly sweep, on a timer rather than at boot: a restart loop must not turn
@@ -192,6 +223,14 @@ async function cmdToken(cfg: FestConfig, argv: readonly string[]): Promise<void>
     if (email === undefined) throw new Error("usage: fest token create <email> [name]");
     const user = ensureUser(store, { orgId: org.id, email, role: "member" });
     const created = createToken(store, { orgId: org.id, userId: user.id, name: argv[2] ?? "" });
+    recordAudit(store, {
+      orgId: org.id,
+      actorLabel: "cli",
+      action: "token.create",
+      target: created.id,
+      outcome: "ok",
+      detail: { user: user.email, name: argv[2] ?? "" },
+    });
     out(`token id : ${created.id}`);
     out(`user     : ${user.email}`);
     out("");
@@ -213,11 +252,157 @@ async function cmdToken(cfg: FestConfig, argv: readonly string[]): Promise<void>
   } else if (sub === "revoke") {
     const id = argv[1];
     if (id === undefined) throw new Error("usage: fest token revoke <token-id>");
-    out(revokeToken(store, org.id, id) ? `revoked ${id}` : `not found or already revoked: ${id}`);
+    const revoked = revokeToken(store, org.id, id);
+    recordAudit(store, {
+      orgId: org.id,
+      actorLabel: "cli",
+      action: "token.revoke",
+      target: id,
+      outcome: revoked ? "ok" : "denied",
+    });
+    out(revoked ? `revoked ${id}` : `not found or already revoked: ${id}`);
   } else {
     throw new Error(`unknown token subcommand: ${sub}`);
   }
   store.close();
+}
+
+/**
+ * Read a password from stdin when asked to, otherwise generate one.
+ *
+ * Never from a command-line argument: `fest admin create x --password hunter2`
+ * puts the password in the shell history, in `ps` output for every user on the
+ * box, and often in a CI log. `--password-stdin` is the automation path; the
+ * default is a generated password shown once, which is the one most operators
+ * should take.
+ */
+async function readPassword(argv: readonly string[]): Promise<{ password: string; generated: boolean }> {
+  if (!argv.includes("--password-stdin")) return { password: generatePassword(), generated: true };
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  const password = Buffer.concat(chunks).toString("utf8").replace(/\r?\n$/, "");
+  if (password === "") throw new Error("--password-stdin was given but stdin was empty");
+  return { password, generated: false };
+}
+
+function flagValue(argv: readonly string[], name: string): string | undefined {
+  const i = argv.indexOf(`--${name}`);
+  return i === -1 ? undefined : argv[i + 1];
+}
+
+async function cmdAdmin(cfg: FestConfig, argv: readonly string[]): Promise<void> {
+  const store = await withStore(cfg);
+  const org = ensureOrg(store);
+  const sub = argv[0] ?? "list";
+
+  try {
+    if (sub === "create" || sub === "passwd") {
+      const email = argv[1];
+      if (email === undefined) throw new Error(`usage: fest admin ${sub} <email> [--role R] [--password-stdin]`);
+
+      const roleFlag = flagValue(argv, "role");
+      if (roleFlag !== undefined && !["owner", "admin", "member"].includes(roleFlag)) {
+        throw new Error("--role must be owner, admin or member");
+      }
+
+      /**
+       * An existing user keeps their role unless `--role` says otherwise.
+       *
+       * Found by running it: `admin passwd` on the only owner silently demoted
+       * them to `admin`, which left the deployment with no owner — and an
+       * ownerless deployment on loopback serves the API unauthenticated. A
+       * routine password rotation therefore turned the dashboard's auth off.
+       * Changing a password must change exactly the password.
+       *
+       * Only when the user is new does the default apply, and then the FIRST
+       * account is the owner whatever it asked for: a deployment with only an
+       * `admin` has nobody able to grant the owner role afterwards.
+       */
+      const existing = findUserByEmail(store, org.id, normaliseEmail(email));
+      const role = (roleFlag ?? existing?.role ?? (hasAnyOwner(store, org.id) ? "admin" : "owner")) as
+        | "owner"
+        | "admin"
+        | "member";
+
+      const { password, generated } = await readPassword(argv);
+      const user = await grantDashboardAccess(store, {
+        orgId: org.id,
+        email,
+        password,
+        role,
+      });
+
+      recordAudit(store, {
+        orgId: org.id,
+        actorLabel: "cli",
+        action: sub === "create" ? "admin.create" : "admin.passwd",
+        target: user.email,
+        outcome: "ok",
+        detail: { role },
+      });
+
+      out(`user : ${user.email}`);
+      out(`role : ${user.role}`);
+      if (generated) {
+        out("");
+        // Shown exactly once: only the scrypt hash is stored.
+        out(`  ${password}`);
+        out("");
+        out("This is the only time the password is shown. Store it in a password manager.");
+      } else {
+        out("password set from stdin");
+      }
+      out("Existing sessions for this user have been signed out.");
+      return;
+    }
+
+    if (sub === "list") {
+      const rows = store.db
+        .prepare(
+          `SELECT email, role, password_hash IS NOT NULL AS can_sign_in, disabled_at, password_set_at
+             FROM users WHERE org_id = ? ORDER BY role, email`,
+        )
+        .all(org.id) as Array<Record<string, unknown>>;
+      if (rows.length === 0) out("(no users)");
+      for (const r of rows) {
+        const state = r["disabled_at"] !== null ? "disabled" : Number(r["can_sign_in"]) === 1 ? "sign-in" : "metered-only";
+        out(`${String(r["email"]).padEnd(32)} ${String(r["role"]).padEnd(7)} ${state}`);
+      }
+      return;
+    }
+
+    if (sub === "disable" || sub === "enable") {
+      const email = argv[1];
+      if (email === undefined) throw new Error(`usage: fest admin ${sub} <email>`);
+      const disabling = sub === "disable";
+      const res = store.db
+        .prepare(`UPDATE users SET disabled_at = ? WHERE org_id = ? AND email = ?`)
+        .run(disabling ? Date.now() : null, org.id, normaliseEmail(email));
+      if (Number(res.changes) === 0) throw new Error(`no such user: ${email}`);
+
+      // Disabling has to take effect now, not at the next sign-in. A live
+      // cookie outliving the account is the whole reason this command exists.
+      if (disabling) {
+        const user = store.db
+          .prepare(`SELECT id FROM users WHERE org_id = ? AND email = ?`)
+          .get(org.id, normaliseEmail(email)) as { id: string } | undefined;
+        if (user !== undefined) revokeUserSessions(store, user.id);
+      }
+      recordAudit(store, {
+        orgId: org.id,
+        actorLabel: "cli",
+        action: disabling ? "admin.disable" : "admin.enable",
+        target: normaliseEmail(email),
+        outcome: "ok",
+      });
+      out(`${disabling ? "disabled" : "enabled"} ${normaliseEmail(email)}`);
+      return;
+    }
+
+    throw new Error(`unknown admin subcommand: ${sub}`);
+  } finally {
+    store.close();
+  }
 }
 
 function intFlag(argv: readonly string[], name: string): number | undefined {
@@ -323,6 +508,9 @@ async function main(): Promise<void> {
     case "token":
       await cmdToken(cfg, argv.slice(1));
       return;
+    case "admin":
+      await cmdAdmin(cfg, argv.slice(1));
+      return;
     case "seed":
       await cmdSeed(cfg, argv.slice(1));
       return;
@@ -332,7 +520,9 @@ async function main(): Promise<void> {
       out(
         "fest serve | migrate |\n" +
           "     seed [--requests N] [--hours N] [--reset | --clear] [--force] |\n" +
-          "     token create <email> [name] | token list | token revoke <id>",
+          "     token create <email> [name] | token list | token revoke <id> |\n" +
+          "     admin create <email> [--role R] [--password-stdin] | admin list |\n" +
+          "     admin passwd <email> | admin disable <email> | admin enable <email>",
       );
       return;
     default:

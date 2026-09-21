@@ -21,6 +21,8 @@ import type { UsageSink } from "../ingest/sink.ts";
 import type { FestConfig } from "../config.ts";
 import type { Store } from "../store/db.ts";
 import { handleApi } from "../api/routes.ts";
+import { handleAuth } from "../api/auth.ts";
+import { authorizeApi } from "../auth/guard.ts";
 import { handleModels } from "../api/models.ts";
 import { handleCountTokens } from "../pipeline/count-tokens.ts";
 import { detectInbound } from "../auth/posture.ts";
@@ -96,19 +98,68 @@ export function createServer(deps: ServerDeps): Server {
           return;
         }
 
-        // Dashboard JSON API. Every endpoint is a projection of one function in
-        // store/queries.ts, where org and member scoping is enforced.
-        if (
-          handleApi(req, res, path, {
+        // Everything under /api/ is the dashboard, and needs a human session.
+        // The proxy path below is authenticated completely differently, by a
+        // developer's identity token — a developer must never have to sign in
+        // to a web page before their editor works.
+        if (path.startsWith("/api/")) {
+          const decision = authorizeApi(req, {
             store: deps.store,
-            sink: deps.sink,
-            bus: deps.bus,
             orgId: deps.orgId,
-            routes: routesOf(),
-            secrets: ctx.secrets,
-          })
-        ) {
-          return;
+            bindHost: deps.config.host,
+            secureCookies: deps.config.secureCookies,
+          });
+
+          // Login and "who am I" are reachable without a session, by
+          // definition. They still see the decision's session when there is one.
+          if (
+            await handleAuth(req, res, path, {
+              store: deps.store,
+              orgId: deps.orgId,
+              secureCookies: deps.config.secureCookies,
+            }, decision.allow ? decision.session : null)
+          ) {
+            return;
+          }
+
+          if (!decision.allow) {
+            res.writeHead(decision.status, {
+              "content-type": "application/json",
+              "cache-control": "no-store",
+            });
+            res.end(JSON.stringify({ error: decision.error }));
+            return;
+          }
+
+          // Every endpoint is a projection of one function in
+          // store/queries.ts, where org and member scoping is enforced.
+          // A member sees their own traffic and nobody else's, so their scope
+          // carries the user id the query layer filters on. The query layer
+          // fails closed without it — a member scope with no userId throws
+          // rather than quietly widening to the whole org — which is how this
+          // wiring bug surfaced as a 500 in a test instead of as a data leak.
+          const scope = decision.session === null
+            // Unclaimed and on loopback: the guard already refused this case on
+            // any other interface.
+            ? { orgId: deps.orgId, role: "admin" as const }
+            : {
+                orgId: decision.session.orgId,
+                role: decision.session.role,
+                ...(decision.session.role === "member" ? { userId: decision.session.userId } : {}),
+              };
+
+          if (
+            handleApi(req, res, path, {
+              store: deps.store,
+              sink: deps.sink,
+              bus: deps.bus,
+              routes: routesOf(),
+              secrets: ctx.secrets,
+              scope,
+            })
+          ) {
+            return;
+          }
         }
 
         if (path === "/healthz") {

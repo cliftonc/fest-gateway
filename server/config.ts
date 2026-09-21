@@ -28,6 +28,17 @@ export interface FestConfig {
    * to have written a file saying so.
    */
   readonly routesPath: string | null;
+  /**
+   * Marks the dashboard session cookie `Secure` and gives it the `__Host-`
+   * prefix. Set it whenever Fest is reached over HTTPS — including behind a TLS
+   * terminating proxy, where the server itself only ever sees plain HTTP and so
+   * cannot work this out for itself.
+   *
+   * Defaults to false so a loopback trial over http:// can log in at all: a
+   * Secure cookie on an http:// origin is silently dropped by the browser,
+   * which presents as "login succeeds, then immediately signs me out".
+   */
+  readonly secureCookies: boolean;
 }
 
 function intFromEnv(name: string, fallback: number): number {
@@ -71,6 +82,7 @@ export function loadConfig(): FestConfig {
     logLevel: level,
     requireIdentity: boolFromEnv("FEST_REQUIRE_IDENTITY", false),
     routesPath: (process.env.FEST_ROUTES ?? "").trim() || null,
+    secureCookies: boolFromEnv("FEST_SECURE_COOKIES", false),
   };
 }
 

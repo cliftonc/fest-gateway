@@ -8,7 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 
-export type IdPrefix = "org" | "usr" | "tok";
+export type IdPrefix = "org" | "usr" | "tok" | "ses";
 
 export function newId(prefix: IdPrefix): string {
   // Dashes stripped: the id ends up in URLs and CLI args, and 32 hex chars
