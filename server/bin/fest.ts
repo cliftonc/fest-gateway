@@ -10,9 +10,11 @@
  *   fest seed [--requests N] [--hours N] [--force]
  *                                     synthetic traffic, for looking at the
  *                                     dashboard without a live session
+ *   fest seed --reset                 discard the database, then seed it fresh
+ *   fest seed --clear                 discard the database and stop
  */
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { loadConfig, describeConfig } from "../config.ts";
 import type { FestConfig } from "../config.ts";
@@ -26,7 +28,7 @@ import { ensureOrg, ensureUser, findUserByEmail } from "../store/bootstrap.ts";
 import { createToken, listTokens, revokeToken, resolveToken, createLastUsedTracker } from "../store/tokens.ts";
 import { createRequestWriter } from "../store/write.ts";
 import { startRetention, DEFAULT_RETENTION } from "../store/retention.ts";
-import { seed, existingRequestCount } from "../store/seed.ts";
+import { seed, existingRequestCount, isDefaultDatabase } from "../store/seed.ts";
 
 const out = (s: string): void => void process.stdout.write(s + "\n");
 
@@ -154,18 +156,61 @@ function intFlag(argv: readonly string[], name: string): number | undefined {
   return n;
 }
 
+/**
+ * Discard a database entirely, rather than deleting rows from it.
+ *
+ * Unlink and not `DELETE FROM`: once synthetic and observed rows share a table
+ * there is no honest predicate that separates them, so a partial wipe would
+ * have to guess. Removing the file is total and unambiguous — you know exactly
+ * what you have afterwards, which is nothing.
+ *
+ * Refuses the default database without `--force`, because the one thing this
+ * command must never do is silently destroy a real record of a team's usage on
+ * the way to showing someone a demo.
+ */
+async function discardDatabase(cfg: FestConfig, force: boolean): Promise<void> {
+  if (isDefaultDatabase(cfg.dbPath) && !force) {
+    throw new Error(
+      `refusing to delete the default database (${cfg.dbPath}).\n` +
+        "That is where real traffic is recorded. Point at a scratch database:\n" +
+        "  npm run demo:clean          (uses ./data/demo.db)\n" +
+        "  FEST_DB=./data/scratch.db node server/bin/fest.ts seed --clear\n" +
+        "or pass --force if you genuinely mean this one.",
+    );
+  }
+
+  // The -wal and -shm siblings hold committed pages. Leaving them behind next
+  // to a deleted main file is how a "cleared" database comes back populated.
+  await Promise.all(
+    [cfg.dbPath, `${cfg.dbPath}-wal`, `${cfg.dbPath}-shm`].map((f) =>
+      rm(f, { force: true }),
+    ),
+  );
+}
+
 async function cmdSeed(cfg: FestConfig, argv: readonly string[]): Promise<void> {
+  const force = argv.includes("--force");
+  const clear = argv.includes("--clear");
+  const reset = argv.includes("--reset");
+
+  if (clear || reset) {
+    await discardDatabase(cfg, force);
+    out(`discarded ${cfg.dbPath}`);
+    if (clear) return;
+  }
+
   const store = await withStore(cfg);
   const existing = existingRequestCount(store);
 
   // Invented numbers must never be blended into observed ones. A dashboard is
   // only worth anything if you can trust that what it shows was measured.
-  if (existing > 0 && !argv.includes("--force")) {
+  if (existing > 0 && !force) {
     store.close();
     throw new Error(
       `${cfg.dbPath} already holds ${existing} request(s).\n` +
-        "Seeding would mix synthetic rows into real traffic. Use a scratch database:\n" +
-        "  FEST_DB=./data/demo.db npm run seed\n" +
+        "Seeding would mix synthetic rows into real traffic. Either start clean:\n" +
+        "  npm run demo                (scratch database, reset each time)\n" +
+        "  node server/bin/fest.ts seed --reset\n" +
         "or pass --force if you are certain this database is disposable.",
     );
   }
@@ -181,7 +226,8 @@ async function cmdSeed(cfg: FestConfig, argv: readonly string[]): Promise<void> 
   out(`seeded ${result.written} synthetic requests into ${cfg.dbPath}`);
   out(`developers: ${result.users.join(", ")}`);
   out("");
-  out("These rows are INVENTED. Delete the database before trusting any number in it.");
+  out("These rows are INVENTED. Discard them with --clear before trusting any");
+  out("number in this database.");
 }
 
 async function main(): Promise<void> {
@@ -212,7 +258,8 @@ async function main(): Promise<void> {
     case "--help":
     case "-h":
       out(
-        "fest serve | migrate | seed [--requests N] [--hours N] [--force] |\n" +
+        "fest serve | migrate |\n" +
+          "     seed [--requests N] [--hours N] [--reset | --clear] [--force] |\n" +
           "     token create <email> [name] | token list | token revoke <id>",
       );
       return;

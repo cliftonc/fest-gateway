@@ -24,6 +24,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type { UsageRecord } from "../../shared/types.ts";
 import type { Store } from "./db.ts";
 import { createRequestWriter } from "./write.ts";
@@ -199,6 +200,20 @@ export function seed(store: Store, opts: { requests?: number; hours?: number } =
   });
   const written = createRequestWriter(store).writeBatch(org.id, records);
   return { written, users: SEED_USERS };
+}
+
+/** The database `serve` uses by default. Never wiped without an explicit say-so. */
+export const DEFAULT_DB_PATH = "./data/fest.db";
+
+/**
+ * Is this the database that records real traffic?
+ *
+ * Path-resolved rather than string-compared, so `data/fest.db`,
+ * `./data/fest.db` and an absolute path all answer the same. A guard that can
+ * be stepped around by spelling the path differently is not a guard.
+ */
+export function isDefaultDatabase(dbPath: string): boolean {
+  return resolve(dbPath) === resolve(DEFAULT_DB_PATH);
 }
 
 export function existingRequestCount(store: Store): number {
