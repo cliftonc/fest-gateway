@@ -105,6 +105,7 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
         "The dashboard would serve every developer's usage to anyone who finds the port.\n" +
         "Create one first:\n" +
         "  node server/bin/fest.ts admin create you@corp.test\n" +
+        "  (in Docker: docker compose run --rm fest admin create you@corp.test)\n" +
         "or bind to loopback (FEST_HOST=127.0.0.1) for a single-developer trial.",
     );
   }

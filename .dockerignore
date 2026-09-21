@@ -1,0 +1,11 @@
+node_modules
+web/dist
+dist
+data
+.git
+.env
+.env.*
+!.env.example
+routes.json
+*.log
+capture-*.jsonl

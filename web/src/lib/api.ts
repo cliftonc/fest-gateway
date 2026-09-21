@@ -10,6 +10,7 @@
  */
 
 import type {
+  AuditResponse,
   ErrorsResponse,
   ModelsResponse,
   OverviewResponse,
@@ -41,6 +42,12 @@ async function get<T>(path: string, params: Record<string, string | undefined>):
   const res = await fetch(`/api/${path}${qs === "" ? "" : `?${qs}`}`, {
     headers: { accept: "application/json" },
   });
+  if (res.status === 401) {
+    // The session expired, or was signed out in another tab. Tell the shell so
+    // it can show the login screen, rather than letting every panel render its
+    // own "HTTP 401" and leaving the operator to guess what happened.
+    window.dispatchEvent(new Event("fest:unauthenticated"));
+  }
   if (!res.ok) {
     // Surface the server's own message where there is one: "no such endpoint"
     // is far more useful in a toast than "HTTP 404".
@@ -68,6 +75,8 @@ export const api = {
   errors: (r: Range): Promise<ErrorsResponse> => get("errors", rangeParams(r)),
   /** No range: the question is always "where does everyone stand right now". */
   quota: (): Promise<QuotaResponse> => get("quota", {}),
+  /** Administrative history, not traffic. Admin and owner only. */
+  audit: (): Promise<AuditResponse> => get("audit", {}),
   /** Config, not traffic — no range, and it only changes on a restart. */
   routing: (): Promise<RoutingResponse> => get("routing", {}),
   requests: (f: FeedFilters, before?: number | null): Promise<RequestsResponse> =>

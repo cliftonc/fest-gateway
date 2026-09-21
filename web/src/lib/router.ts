@@ -12,7 +12,7 @@
 
 import { useSyncExternalStore } from "react";
 
-export const PAGES = ["posture", "live", "overview", "users", "models", "errors"] as const;
+export const PAGES = ["posture", "live", "overview", "users", "models", "errors", "admin"] as const;
 export type PageId = (typeof PAGES)[number];
 
 export const PAGE_TITLES: Readonly<Record<PageId, string>> = {
@@ -22,6 +22,7 @@ export const PAGE_TITLES: Readonly<Record<PageId, string>> = {
   users: "Users",
   models: "Models",
   errors: "Errors",
+  admin: "Audit log",
 };
 
 function currentHash(): string {

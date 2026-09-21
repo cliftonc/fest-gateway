@@ -8,18 +8,32 @@ and route to different models without Claude Code knowing the difference.
 developer authenticates with their *own* subscription. Fest relays their own
 credential and never stores it. Per-user pass-through, never pooling.
 
-> **Status: Phase 2 working.** A real Claude Code session on a Max subscription
-> runs through Fest, is authenticated against an identity token, and is stored
-> in SQLite with hourly rollups and quota tracking. Phase 0 cleared both gates
-> ([results](docs/PHASE0-RESULTS.md)). Next: the dashboard.
+> **Status: feature complete for a team trial.** A real Claude Code session on a
+> Max subscription runs through Fest, is attributed to its developer, metered
+> into SQLite, and shown on a dashboard behind a login. Model routing and
+> substitution work and are visible. Phase 0 cleared both gates
+> ([results](docs/PHASE0-RESULTS.md)), and `npm run canary` re-checks them
+> against each new Claude Code release.
 
 ```bash
-node server/bin/fest.ts migrate
-node server/bin/fest.ts token create you@corp.test laptop   # shown once
-FEST_REQUIRE_IDENTITY=1 node server/bin/fest.ts serve
+docker compose run --rm fest admin create you@corp.test    # password shown once
+docker compose up -d
+docker compose run --rm fest token create dev@corp.test laptop   # shown once
+```
 
+Each developer then points Claude Code at the printed URL:
+
+```bash
 env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
-  ANTHROPIC_BASE_URL=http://127.0.0.1:8787/t/<token> claude
+  ANTHROPIC_BASE_URL=http://fest.corp:8787/t/<token> claude
+```
+
+Or without Docker:
+
+```bash
+node server/bin/fest.ts admin create you@corp.test
+node server/bin/fest.ts token create dev@corp.test laptop
+FEST_REQUIRE_IDENTITY=1 node server/bin/fest.ts serve
 ```
 
 ## Why this is possible
@@ -103,6 +117,67 @@ test/                     node --test
   Anthropic returns 5h/7d utilisation on every response, so that is what the
   dashboard shows rather than an invented dollar figure.
 
+## What Fest can see, and what it keeps
+
+This is a gateway every prompt a team writes passes through, so it is worth
+being exact about what that means rather than reassuring.
+
+**Fest sees everything, because it has to.** A request body arrives at this
+process in full: prompts, file contents you asked Claude about, tool results,
+the lot. That is unavoidable for anything sitting on the wire, and no wording
+changes it.
+
+**Fest keeps none of it.** Request bodies are relayed as opaque bytes and never
+parsed for storage. What is written down is metadata: who, when, which model,
+how many tokens in each of the four buckets, latency, HTTP status, error type,
+and the session id Claude Code already sends. There is no column anywhere in
+the schema for prompt or completion text — not disabled, absent — so "turn off
+content capture" is not a setting that could be misconfigured.
+
+**No credential is persistable, by construction rather than by policy.** A
+subscription bearer is forwarded and forgotten; there is no table to put one in.
+What is stored of a Fest identity token or a dashboard password is a hash. The
+leak tests grep the entire database, every log line and every API response for
+secret-shaped strings.
+
+**Raw per-request rows age out after 30 days**; the hourly rollups, which are
+aggregate, are kept for 400 so a year of trends does not require a year of
+per-developer detail.
+
+**An admin can see who used what, and when.** That is the point of a team
+gateway, and the developers pointing their editors at it should be told so
+plainly. They cannot see each other: a `member` account sees only its own
+traffic, enforced in the query layer rather than in the UI.
+
+## Deploying it
+
+`docker compose up -d` after creating an owner account. The image has no runtime
+dependencies — Node runs the TypeScript directly — so it is Node plus this
+repository.
+
+The dashboard needs a sign-in: scrypt passwords, an opaque session cookie
+hashed at rest, an origin check on the two endpoints that mutate anything, and
+an audit log of administrative actions. Accounts are granted from the host with
+`fest admin create`; there is no self-registration and no email reset, because a
+gateway should not need mail credentials to run.
+
+Before anyone has run `fest admin create`, Fest serves the dashboard **open on
+loopback and refuses to start on any other interface**. A single-developer trial
+needs no setup, and "bound it to 0.0.0.0 and forgot the password" cannot happen
+quietly.
+
+Put it behind your own TLS proxy and set `FEST_SECURE_COOKIES=1` when you do:
+the server only ever sees plain HTTP and cannot detect this for itself.
+
+| | |
+| --- | --- |
+| `FEST_PORT`, `FEST_HOST` | listen address. Default `127.0.0.1:8787`. |
+| `FEST_DB`, `FEST_USAGE_LOG` | SQLite path, and the greppable JSONL trail. |
+| `FEST_REQUIRE_IDENTITY` | refuse unattributed requests. Off by default; **on** for a team. |
+| `FEST_SECURE_COOKIES` | set behind HTTPS. |
+| `FEST_ROUTES` | routing table path. Absent means everything passes through. |
+| `FEST_UPSTREAM_BASE_URL`, `FEST_LOG_LEVEL` | |
+
 ## Requirements
 
 Node >= 22.18 (TypeScript runs directly via native type stripping — no build
@@ -115,4 +190,12 @@ npm test          # node --test
 npm run canary    # version gate: re-run before rolling out a Claude Code release
 npm run capture   # Phase 0 capture server
 npm run typecheck # tsc --noEmit (needs npm install first)
+npm run dev       # gateway + dashboard with hot reload
+npm run demo      # synthetic traffic in a scratch database, then both of the above
+```
+
+```bash
+node server/bin/fest.ts admin create <email> [--role R] [--password-stdin]
+node server/bin/fest.ts admin list | admin passwd <email> | admin disable <email>
+node server/bin/fest.ts token create <email> [name] | token list | token revoke <id>
 ```

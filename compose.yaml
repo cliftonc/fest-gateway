@@ -1,0 +1,48 @@
+# Fest, for a team.
+#
+# First run, before `up`, because Fest refuses to serve an unauthenticated
+# dashboard on anything but loopback and a container is never on loopback:
+#
+#   docker compose run --rm fest admin create you@corp.test
+#
+# The password is printed once. Then:
+#
+#   docker compose up -d
+#   docker compose run --rm fest token create dev@corp.test laptop
+#
+# and each developer points Claude Code at the printed URL. They must NOT set
+# ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN: either one silently drops them off
+# their own subscription onto whatever credential this server holds.
+
+services:
+  fest:
+    build: .
+    image: fest:local
+    restart: unless-stopped
+    ports:
+      # Bound to loopback by default. Publishing this port to the world puts an
+      # inference gateway on the internet; put it behind your own TLS proxy and
+      # set FEST_SECURE_COOKIES=1 when you do.
+      - "127.0.0.1:8787:8787"
+    environment:
+      # Team deployments want this on: without it, a request carrying no
+      # identity token is still served and recorded against nobody, which
+      # defeats the point of a shared gateway.
+      FEST_REQUIRE_IDENTITY: "1"
+      # Set to 1 when Fest is reached over HTTPS, including behind a TLS
+      # terminating proxy — the server only sees plain HTTP and cannot work it
+      # out for itself. It marks the session cookie Secure and __Host-.
+      FEST_SECURE_COOKIES: "0"
+      # FEST_ROUTES: /config/routes.json
+    env_file:
+      # Provider keys for the substitute path, if any are configured. Optional:
+      # with no routing table Fest can only relay on the caller's own
+      # credential, which is the default and the safe one.
+      - path: .env
+        required: false
+    volumes:
+      - fest-data:/data
+      # - ./routes.json:/config/routes.json:ro
+
+volumes:
+  fest-data:
