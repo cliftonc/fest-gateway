@@ -159,3 +159,26 @@ third-party gateway. This works because no guard exists, not because it is a
 supported feature. Re-run (a) and (e) against every new Claude Code release
 before rolling it to a team — the failure mode is silent demotion of everyone
 onto a server-held key.
+
+---
+
+## Running Fest itself (post-Phase 2)
+
+```bash
+node server/bin/fest.ts migrate
+node server/bin/fest.ts token create you@corp.test laptop   # shown once
+FEST_REQUIRE_IDENTITY=1 node server/bin/fest.ts serve
+```
+
+```bash
+env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+  ANTHROPIC_BASE_URL=http://127.0.0.1:8787/t/<token> claude
+```
+
+`FEST_REQUIRE_IDENTITY=1` is what a team deployment wants: without it,
+unattributed requests are served and recorded with a null `user_id`, which
+defeats the point of a shared gateway. It defaults to off only so a
+single-developer trial works with no setup.
+
+Env: `FEST_PORT`, `FEST_HOST`, `FEST_DB`, `FEST_USAGE_LOG`,
+`FEST_UPSTREAM_BASE_URL`, `FEST_LOG_LEVEL`, `FEST_REQUIRE_IDENTITY`.

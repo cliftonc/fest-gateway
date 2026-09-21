@@ -8,15 +8,18 @@ and route to different models without Claude Code knowing the difference.
 developer authenticates with their *own* subscription. Fest relays their own
 credential and never stores it. Per-user pass-through, never pooling.
 
-> **Status: Phase 1 working.** A real Claude Code session on a Max subscription
-> runs through Fest and is metered. Phase 0 cleared both gates
-> ([results](docs/PHASE0-RESULTS.md)). Next: SQLite store, then the dashboard.
+> **Status: Phase 2 working.** A real Claude Code session on a Max subscription
+> runs through Fest, is authenticated against an identity token, and is stored
+> in SQLite with hourly rollups and quota tracking. Phase 0 cleared both gates
+> ([results](docs/PHASE0-RESULTS.md)). Next: the dashboard.
 
 ```bash
-node server/bin/fest.ts
+node server/bin/fest.ts migrate
+node server/bin/fest.ts token create you@corp.test laptop   # shown once
+FEST_REQUIRE_IDENTITY=1 node server/bin/fest.ts serve
 
 env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
-  ANTHROPIC_BASE_URL=http://127.0.0.1:8787/t/<your-token> claude
+  ANTHROPIC_BASE_URL=http://127.0.0.1:8787/t/<token> claude
 ```
 
 ## Why this is possible
@@ -68,11 +71,33 @@ supported product.
 ## Layout
 
 ```
-tools/capture-server.ts   Phase 0 diagnostic (throwaway)
+server/bin/fest.ts        CLI: serve | migrate | token create/list/revoke
+server/pipeline/          passthrough (byte-for-byte) — the subscription path
+server/http/              sse parser, tee, header discipline, errors, routing
+server/store/             SQLite schema, write path, identity tokens
+server/usage/             accumulator, lean pricing, nullable cost algebra
 server/secret/            credential classification + redaction
+shared/types.ts           the contracts both halves agree on
+tools/capture-server.ts   Phase 0 diagnostic (throwaway)
 docs/PHASE0.md            the gating experiment runbook
 test/                     node --test
 ```
+
+## Accounting rules that are easy to get wrong
+
+- **The four token buckets are disjoint.** `input_tokens` excludes cache reads
+  and cache writes; context size is the sum. Folding cache reads into input is
+  an order-of-magnitude error on a cache-heavy agent workload — and Claude Code
+  is one (a trivial `-p` call here showed ~16k cache reads and ~12k one-hour
+  cache writes).
+- **`null` cost means unavailable, never zero.** A subscription request is real
+  usage with *no org spend*; an unknown model is unpriced, not free. Rollups
+  therefore carry a priced sum plus `unpriced_requests` and
+  `subscription_requests` separately, so a total renders honestly as
+  `$12.3456 (+3 n/a)`.
+- **For a subscription developer, quota is the scarce resource, not dollars.**
+  Anthropic returns 5h/7d utilisation on every response, so that is what the
+  dashboard shows rather than an invented dollar figure.
 
 ## Requirements
 
