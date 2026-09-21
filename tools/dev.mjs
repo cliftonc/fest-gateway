@@ -31,7 +31,14 @@ const targets = [
     name: "gateway",
     colour: "\u001b[36m",
     command: process.execPath,
-    args: ["--watch", "--watch-preserve-output", "server/bin/fest.ts"],
+    // --env-file-if-exists: loads .env when present, no error when absent, no
+    // dotenv dependency. Node does this natively as of 22.
+    args: [
+      "--watch",
+      "--watch-preserve-output",
+      "--env-file-if-exists=.env",
+      "server/bin/fest.ts",
+    ],
   },
   {
     name: "web",

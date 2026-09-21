@@ -36,7 +36,35 @@ traffic back onto developers' subscriptions.
 }
 ```
 
-Run with `FEST_ROUTES=./routes.json npm start`.
+## Where the keys go
+
+In a `.env` file in the repo root. `npm start`, `npm run dev` and `npm run demo`
+load it through Node's own `--env-file-if-exists=.env` — no `dotenv`
+dependency, and no failure when the file is absent.
+
+```sh
+cp .env.example .env
+# edit .env:
+#   FIREWORKS_API_KEY=fw_...
+#   FEST_ROUTES=./routes.json
+npm run dev
+```
+
+`.env` and `routes.json` are both gitignored; `.env.example` (variable names
+only) is tracked. Anything else — a real secrets manager, systemd
+`EnvironmentFile`, a Kubernetes secret mounted as env — works unchanged, because
+Fest only ever reads `process.env`.
+
+The value is read at the moment a request needs it, not snapshotted at boot, so
+rotating a key does not require reasoning about whether Fest cached the old one.
+
+**What `.env` must never contain:** `ANTHROPIC_API_KEY` or
+`ANTHROPIC_AUTH_TOKEN`. Those belong to the *developer's* environment, and
+setting either one there makes Claude Code stop using their Max/Team
+subscription and silently bill a key instead. That is the exact
+silent-billing-substitution failure this whole design is built against.
+
+Run with `FEST_ROUTES=./routes.json npm start`, or set `FEST_ROUTES` in `.env`.
 
 ### Matching
 

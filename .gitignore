@@ -1,8 +1,16 @@
 node_modules/
 data/
 dist/
+web/dist/
 *.log
 capture-*.jsonl
 .DS_Store
-data/
-web/dist/
+
+# Credentials. Listed before anything can create one, and with the negation
+# last so `.env.example` — which holds only variable NAMES — is still tracked.
+.env
+.env.*
+!.env.example
+
+# A real routing table may name internal hosts; the example is the shared one.
+routes.json

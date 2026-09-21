@@ -9,14 +9,14 @@
   },
   "scripts": {
     "dev": "node tools/dev.mjs",
-    "start": "node server/bin/fest.ts",
+    "start": "node --env-file-if-exists=.env server/bin/fest.ts",
     "build": "vite build",
     "capture": "node tools/capture-server.ts",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
-    "seed": "node server/bin/fest.ts seed",
-    "demo": "FEST_DB=./data/demo.db FEST_USAGE_LOG=./data/demo.jsonl node server/bin/fest.ts seed --reset && FEST_DB=./data/demo.db FEST_USAGE_LOG=./data/demo.jsonl node tools/dev.mjs",
-    "demo:clean": "FEST_DB=./data/demo.db FEST_USAGE_LOG=./data/demo.jsonl node server/bin/fest.ts seed --clear && rm -f ./data/demo.jsonl"
+    "seed": "node --env-file-if-exists=.env server/bin/fest.ts seed",
+    "demo": "FEST_DB=./data/demo.db FEST_USAGE_LOG=./data/demo.jsonl node --env-file-if-exists=.env server/bin/fest.ts seed --reset && FEST_DB=./data/demo.db FEST_USAGE_LOG=./data/demo.jsonl node tools/dev.mjs",
+    "demo:clean": "FEST_DB=./data/demo.db FEST_USAGE_LOG=./data/demo.jsonl node --env-file-if-exists=.env server/bin/fest.ts seed --clear && rm -f ./data/demo.jsonl"
   },
   "devDependencies": {
     "@tanstack/charts": "^0.18.0",
