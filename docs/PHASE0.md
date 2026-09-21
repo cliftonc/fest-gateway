@@ -160,6 +160,10 @@ supported feature. Re-run (a) and (e) against every new Claude Code release
 before rolling it to a team — the failure mode is silent demotion of everyone
 onto a server-held key.
 
+That re-run is automated: `npm run canary`, documented in [CANARY.md](CANARY.md),
+with the verdict for each version recorded in `canary-history.jsonl`. The runs
+below stay here because a red canary is localised by hand, one change at a time.
+
 ---
 
 ## Running Fest itself (post-Phase 2)

@@ -46,9 +46,13 @@ subscriptions onto a server-held key, and the failure is invisible.
 
 **2. This is supported-by-absence, not by design.** There is no *documented*
 path for relaying a subscription bearer through a third-party gateway. It works
-because no guard exists. Treat it as a version-pinned dependency, keep the
-canary test running against every Claude Code release, and settle the policy
-question with Anthropic before a team-wide rollout.
+because no guard exists. Treat it as a version-pinned dependency, and settle the
+policy question with Anthropic before a team-wide rollout.
+
+The version dependency is enforced rather than remembered: `npm run canary`
+re-runs both load-bearing Phase 0 experiments against the installed release and
+refuses the rollout if either has changed. See [docs/CANARY.md](docs/CANARY.md);
+verdicts are recorded per version in `docs/canary-history.jsonl`.
 
 Worth knowing: Anthropic ships its own self-hostable `claude gateway` (see
 `claude gateway --help`) with central metering, pricing and managed policies. It
@@ -108,6 +112,7 @@ step for the server). Vite + React are used only for the dashboard, later.
 
 ```bash
 npm test          # node --test
+npm run canary    # version gate: re-run before rolling out a Claude Code release
 npm run capture   # Phase 0 capture server
 npm run typecheck # tsc --noEmit (needs npm install first)
 ```

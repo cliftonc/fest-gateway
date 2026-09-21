@@ -12,6 +12,7 @@
     "start": "node --env-file-if-exists=.env server/bin/fest.ts",
     "build": "vite build",
     "capture": "node tools/capture-server.ts",
+    "canary": "node tools/canary.ts",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
     "seed": "node --env-file-if-exists=.env server/bin/fest.ts seed",
