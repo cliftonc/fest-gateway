@@ -11,6 +11,7 @@ export interface FestConfig {
   readonly host: string;
   readonly upstreamBaseUrl: string;
   readonly usageLogPath: string;
+  readonly dbPath: string;
   readonly logLevel: "debug" | "info" | "warn" | "error";
   /**
    * When false, a request with no Fest identity token is served anyway and
@@ -57,6 +58,7 @@ export function loadConfig(): FestConfig {
     host: (process.env.FEST_HOST ?? "127.0.0.1").trim(),
     upstreamBaseUrl: upstream.replace(/\/+$/, ""),
     usageLogPath: (process.env.FEST_USAGE_LOG ?? "./data/usage.jsonl").trim(),
+    dbPath: (process.env.FEST_DB ?? "./data/fest.db").trim(),
     logLevel: level,
     requireIdentity: boolFromEnv("FEST_REQUIRE_IDENTITY", false),
   };

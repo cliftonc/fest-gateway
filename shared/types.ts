@@ -140,6 +140,16 @@ export interface UsageRecord {
   readonly posture: Posture;
   readonly identityCarrier: IdentityCarrier;
   readonly callerFingerprint: string | null;
+  /**
+   * Resolved identity, when the presented token matched a live one.
+   *
+   * Null means unattributed: the request was served but we do not know who
+   * made it. We never guess — an unattributed row is a signal an admin needs to
+   * see (someone is not using an identity token), so it is recorded rather
+   * than dropped.
+   */
+  readonly userId: string | null;
+  readonly tokenId: string | null;
   /** Fingerprint of the upstream credential. Never the credential itself. */
   readonly credentialFingerprint: string | null;
   readonly credentialOrigin: CredentialOrigin;

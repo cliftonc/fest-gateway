@@ -20,6 +20,9 @@ import { log } from "../log.ts";
 export interface ServerDeps {
   readonly config: FestConfig;
   readonly sink: UsageSink;
+  readonly orgId: string;
+  readonly resolveIdentity: (raw: string | null) => { tokenId: string; userId: string } | null;
+  readonly touchToken?: ((tokenId: string) => void) | undefined;
 }
 
 function pathnameOf(url: string): string {
@@ -32,6 +35,9 @@ export function createServer(deps: ServerDeps): Server {
     upstreamBaseUrl: deps.config.upstreamBaseUrl,
     sink: deps.sink,
     requireIdentity: deps.config.requireIdentity,
+    orgId: deps.orgId,
+    resolveIdentity: deps.resolveIdentity,
+    touchToken: deps.touchToken,
   };
 
   const server = http.createServer((req, res) => {

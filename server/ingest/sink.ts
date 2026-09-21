@@ -23,6 +23,8 @@ export interface SinkStats {
   readonly written: number;
   readonly dropped: number;
   readonly writeErrors: number;
+  /** Failures of the JSONL trail specifically. Not data loss on its own. */
+  readonly trailErrors: number;
   readonly lastFlushMs: number | null;
 }
 
@@ -43,6 +45,14 @@ export interface SinkOptions {
   readonly maxBatch?: number;
   /** Size of the in-memory ring used by `recent()`. */
   readonly ringSize?: number;
+  /**
+   * Durable persistence for a batch — the system of record.
+   *
+   * Called inside the flush, never on the request path, so a slow insert
+   * cannot add latency to a stream. Must be synchronous and should not throw;
+   * if it does, the batch is requeued once.
+   */
+  readonly onBatch?: ((records: readonly UsageRecord[]) => void) | undefined;
 }
 
 export function createUsageSink(opts: SinkOptions): UsageSink {
@@ -56,6 +66,7 @@ export function createUsageSink(opts: SinkOptions): UsageSink {
   let written = 0;
   let dropped = 0;
   let writeErrors = 0;
+  let trailErrors = 0;
   let lastFlushMs: number | null = null;
   /**
    * The in-flight flush, if any. Held as a promise rather than a boolean so
@@ -86,20 +97,42 @@ export function createUsageSink(opts: SinkOptions): UsageSink {
   async function doFlush(): Promise<void> {
     const startedAt = Date.now();
     const batch = queue.splice(0, maxBatch);
+
+    // The store is the system of record, so it goes first and its outcome
+    // decides whether the batch is safe to let go of.
+    let persisted = true;
+    if (opts.onBatch !== undefined) {
+      try {
+        opts.onBatch(batch);
+      } catch (err) {
+        persisted = false;
+        writeErrors += 1;
+        log.warn("usage store write failed", { error: String(err).slice(0, 200), writeErrors });
+      }
+    }
+
+    // The JSONL file is a convenience trail, not the record. Its failure is
+    // logged and counted but never requeues the batch: retrying purely for the
+    // trail's sake would re-run onBatch and duplicate rows in the store.
     try {
       const payload = batch.map((r) => JSON.stringify(r)).join("\n") + "\n";
       await appendFile(opts.path, payload, "utf8");
-      written += batch.length;
     } catch (err) {
-      writeErrors += 1;
-      // Requeue once at the front, then give up rather than growing without
-      // bound against a persistently failing disk.
-      if (queue.length + batch.length <= maxQueue) queue = [...batch, ...queue];
-      else dropped += batch.length;
-      log.warn("usage sink write failed", { error: String(err).slice(0, 200), writeErrors });
-    } finally {
-      lastFlushMs = Date.now() - startedAt;
+      trailErrors += 1;
+      log.warn("usage trail write failed", { error: String(err).slice(0, 200), trailErrors });
     }
+
+    if (persisted) {
+      written += batch.length;
+    } else if (queue.length + batch.length <= maxQueue) {
+      // Requeue once at the front. Beyond that, drop rather than grow without
+      // bound against a persistently failing store.
+      queue = [...batch, ...queue];
+    } else {
+      dropped += batch.length;
+    }
+
+    lastFlushMs = Date.now() - startedAt;
   }
 
   return {
@@ -137,7 +170,7 @@ export function createUsageSink(opts: SinkOptions): UsageSink {
       }
     },
     stats(): SinkStats {
-      return { queued: queue.length, written, dropped, writeErrors, lastFlushMs };
+      return { queued: queue.length, written, dropped, writeErrors, trailErrors, lastFlushMs };
     },
     recent(limit = 100): readonly UsageRecord[] {
       return ring.slice(-limit).reverse();

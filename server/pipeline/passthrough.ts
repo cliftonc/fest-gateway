@@ -37,6 +37,15 @@ export interface PassthroughContext {
   readonly upstreamBaseUrl: string;
   readonly sink: UsageSink;
   readonly requireIdentity: boolean;
+  /** Org that owns this deployment. Single-org for now, column exists regardless. */
+  readonly orgId: string;
+  /**
+   * Resolve a presented identity token. Injected rather than imported so the
+   * pipeline stays independent of the store (and testable without a database).
+   */
+  readonly resolveIdentity: (raw: string | null) => { tokenId: string; userId: string } | null;
+  /** Coalesced last-used tracking; must not write per request. */
+  readonly touchToken?: ((tokenId: string) => void) | undefined;
 }
 
 function credentialOrigin(hasSubscription: boolean, hasKey: boolean): CredentialOrigin {
@@ -57,6 +66,17 @@ export async function handleMessages(
   const sessionId = headerValue(req, "x-claude-code-session-id");
   const clientVersion = headerValue(req, "user-agent");
 
+  // Resolve identity before anything else, but note the two failure modes are
+  // NOT the same:
+  //   * a token was presented and did not resolve  -> always an error, because
+  //     the developer believes they are attributed and they are not;
+  //   * no token at all -> an error only when the deployment requires one.
+  // Conflating them would let a revoked token silently degrade to
+  // "unattributed" instead of telling the developer their token is dead.
+  const presentedToken = inbound.identityToken;
+  const resolved = ctx.resolveIdentity(presentedToken);
+  if (resolved !== null) ctx.touchToken?.(resolved.tokenId);
+
   const finish = (partial: Partial<UsageRecord> & { status: RequestStatus }): void => {
     const rec: UsageRecord = {
       id,
@@ -65,6 +85,8 @@ export async function handleMessages(
       posture: inbound.posture,
       identityCarrier: inbound.identity.carrier,
       callerFingerprint: inbound.identity.tokenFingerprint,
+      userId: resolved?.userId ?? null,
+      tokenId: resolved?.tokenId ?? null,
       credentialFingerprint: inbound.upstreamCredential?.fingerprint ?? null,
       credentialOrigin: credentialOrigin(
         inbound.upstreamCredential !== null && isSubscriptionCredential(inbound.upstreamCredential),
@@ -93,20 +115,31 @@ export async function handleMessages(
     ctx.sink.record(rec);
   };
 
-  // Identity is separate from the upstream credential and is never forwarded.
-  // Without it, usage cannot be attributed to a developer — which for a team
-  // gateway defeats the point, so it is enforced by default in a team config.
-  if (ctx.requireIdentity && inbound.identity.carrier === "none") {
+  const denyIdentity = (message: string): void => {
     const type = "authentication_error";
     finish({ status: "identity_denied", httpStatus: statusForErrorType(type) });
     res.writeHead(statusForErrorType(type), { "content-type": "application/json" });
-    res.end(
-      anthropicError(
-        type,
-        "Fest: no identity token. Point ANTHROPIC_BASE_URL at https://<fest>/t/<your-token>, " +
-          "or set ANTHROPIC_CUSTOM_HEADERS=\"X-Fest-Token: <your-token>\". " +
-          "Do not set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN: either one disables your Claude subscription.",
-      ),
+    // Claude Code renders error.message to the developer, so this string is
+    // the user-facing UI. Write it for a human who is mid-task.
+    res.end(anthropicError(type, message));
+  };
+
+  if (presentedToken !== null && resolved === null) {
+    denyIdentity(
+      "Fest: that identity token is not valid (unknown, revoked, or expired). " +
+        "Ask an admin for a new one, then update ANTHROPIC_BASE_URL.",
+    );
+    return;
+  }
+
+  // Identity is separate from the upstream credential and is never forwarded.
+  // Without it usage cannot be attributed, which for a team gateway defeats
+  // the point — so a team deployment sets FEST_REQUIRE_IDENTITY=1.
+  if (ctx.requireIdentity && resolved === null) {
+    denyIdentity(
+      "Fest: no identity token. Point ANTHROPIC_BASE_URL at https://<fest>/t/<your-token>, " +
+        "or set ANTHROPIC_CUSTOM_HEADERS=\"X-Fest-Token: <your-token>\". " +
+        "Do not set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN: either one disables your Claude subscription.",
     );
     return;
   }

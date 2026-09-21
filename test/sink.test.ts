@@ -15,6 +15,8 @@ function rec(id: string): UsageRecord {
     posture: "subscription",
     identityCarrier: "path",
     callerFingerprint: "abc123",
+    userId: "usr_1",
+    tokenId: "tok_1",
     credentialFingerprint: "def456",
     credentialOrigin: "inbound_subscription",
     sessionId: "sess-1",
@@ -116,15 +118,66 @@ test("close drains everything already queued", async (t) => {
   assert.equal(readFileSync(path, "utf8").trim().split("\n").length, 5);
 });
 
-test("a write failure is counted, not thrown", async (t) => {
+test("a failing JSONL trail is counted but does not requeue", async (t) => {
   const { dir } = withSink(t);
-  // Path inside a non-existent directory: append will fail.
-  const sink = createUsageSink({ path: join(dir, "nope", "usage.jsonl"), flushMs: 60_000 });
+  const persisted: string[] = [];
+  // Path inside a non-existent directory: the append will fail.
+  const sink = createUsageSink({
+    path: join(dir, "nope", "usage.jsonl"),
+    flushMs: 60_000,
+    onBatch: (records) => {
+      for (const r of records) persisted.push(r.id);
+    },
+  });
   sink.record(rec("a"));
   await sink.flush();
+
+  // The store is the system of record and it succeeded, so the record is safe.
+  assert.deepEqual(persisted, ["a"]);
+  assert.equal(sink.stats().trailErrors, 1);
+  assert.equal(sink.stats().writeErrors, 0);
+  assert.equal(sink.stats().written, 1);
+  // Crucially NOT requeued: retrying for the trail's sake would re-run
+  // onBatch and duplicate rows in the store.
+  assert.equal(sink.stats().queued, 0);
+  await sink.close();
+});
+
+test("a failing store write requeues once and is counted", async (t) => {
+  const { path } = withSink(t);
+  let attempts = 0;
+  const sink = createUsageSink({
+    path,
+    flushMs: 60_000,
+    onBatch: () => {
+      attempts += 1;
+      throw new Error("store unavailable");
+    },
+  });
+  sink.record(rec("a"));
+  await sink.flush();
+
   assert.equal(sink.stats().writeErrors, 1);
   assert.equal(sink.stats().written, 0);
-  // Requeued once rather than lost outright.
+  // Requeued rather than lost, so a transient store failure is survivable.
   assert.equal(sink.stats().queued, 1);
+  assert.equal(attempts, 1);
+  await sink.close();
+});
+
+test("onBatch receives the batch and runs inside the flush, not the hot path", async (t) => {
+  const { path } = withSink(t);
+  const batches: string[][] = [];
+  const sink = createUsageSink({
+    path,
+    flushMs: 60_000,
+    onBatch: (records) => batches.push(records.map((r) => r.id)),
+  });
+  sink.record(rec("a"));
+  sink.record(rec("b"));
+  // Nothing persisted yet: record() must not do I/O.
+  assert.deepEqual(batches, []);
+  await sink.flush();
+  assert.deepEqual(batches, [["a", "b"]]);
   await sink.close();
 });
