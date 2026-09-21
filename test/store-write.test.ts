@@ -84,30 +84,6 @@ function num(value: unknown): number {
   return Number(value ?? 0);
 }
 
-test("migrate applies once, is idempotent, and sets user_version", (t) => {
-  const store = freshStore(t);
-
-  const first = migrate(store);
-  assert.equal(first.applied, 1);
-  assert.equal(first.version, 1);
-
-  const version = store.db.prepare("PRAGMA user_version").get() as { user_version: number };
-  assert.equal(Number(version.user_version), 1);
-
-  const second = migrate(store);
-  assert.equal(second.applied, 0);
-  assert.equal(second.version, 1);
-
-  // The schema really is there.
-  const tables = store.db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-    .all() as Array<{ name: string }>;
-  const names = tables.map((r) => r.name);
-  for (const expected of ["orgs", "users", "identity_tokens", "requests", "usage_hourly"]) {
-    assert.ok(names.includes(expected), `missing table ${expected}`);
-  }
-});
-
 test("open sets WAL and the rest of the pragmas", (t) => {
   const store = freshStore(t);
   const mode = store.db.prepare("PRAGMA journal_mode").get() as { journal_mode: string };

@@ -57,6 +57,7 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     config: cfg,
     sink,
     orgId: org.id,
+    store,
     resolveIdentity: (raw) => resolveToken(store, raw),
     touchToken: (id) => lastUsed.touch(id),
   });

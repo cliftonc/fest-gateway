@@ -15,12 +15,15 @@ import { handleMessages } from "../pipeline/passthrough.ts";
 import type { PassthroughContext } from "../pipeline/passthrough.ts";
 import type { UsageSink } from "../ingest/sink.ts";
 import type { FestConfig } from "../config.ts";
+import type { Store } from "../store/db.ts";
+import { handleApi } from "../api/routes.ts";
 import { log } from "../log.ts";
 
 export interface ServerDeps {
   readonly config: FestConfig;
   readonly sink: UsageSink;
   readonly orgId: string;
+  readonly store: Store;
   readonly resolveIdentity: (raw: string | null) => { tokenId: string; userId: string } | null;
   readonly touchToken?: ((tokenId: string) => void) | undefined;
 }
@@ -54,6 +57,12 @@ export function createServer(deps: ServerDeps): Server {
         if (path === "/api/hello") {
           res.writeHead(200, { "content-type": "application/json" });
           res.end("{}");
+          return;
+        }
+
+        // Dashboard JSON API. Every endpoint is a projection of one function in
+        // store/queries.ts, where org and member scoping is enforced.
+        if (handleApi(req, res, path, { store: deps.store, sink: deps.sink, orgId: deps.orgId })) {
           return;
         }
 
