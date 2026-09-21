@@ -197,9 +197,11 @@ const server = http.createServer(async (req, res) => {
 
   try {
     const upstream = await fetch(target, {
-      method: req.method,
+      method: req.method ?? "POST",
       headers: outHeaders,
-      body: body.length > 0 ? body : undefined,
+      // Conditionally spread rather than passing `undefined`:
+      // exactOptionalPropertyTypes distinguishes "absent" from "undefined".
+      ...(body.length > 0 ? { body: new Uint8Array(body) } : {}),
       redirect: "error",
     });
 

@@ -8,10 +8,16 @@ and route to different models without Claude Code knowing the difference.
 developer authenticates with their *own* subscription. Fest relays their own
 credential and never stores it. Per-user pass-through, never pooling.
 
-> Status: Phase 0. Run (a) **passed** — a real Max/Team login sends its OAuth
-> bearer to a custom base URL, confirmed empirically
-> ([results](docs/PHASE0-RESULTS.md)). Run (e) — whether Anthropic *accepts* a
-> relayed bearer — is the remaining gate. See [docs/PHASE0.md](docs/PHASE0.md).
+> **Status: Phase 1 working.** A real Claude Code session on a Max subscription
+> runs through Fest and is metered. Phase 0 cleared both gates
+> ([results](docs/PHASE0-RESULTS.md)). Next: SQLite store, then the dashboard.
+
+```bash
+node server/bin/fest.ts
+
+env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+  ANTHROPIC_BASE_URL=http://127.0.0.1:8787/t/<your-token> claude
+```
 
 ## Why this is possible
 
