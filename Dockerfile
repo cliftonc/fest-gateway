@@ -1,11 +1,19 @@
 # Fest, as one image.
 #
-# Two stages, and the second one is deliberately almost empty: Fest has NO
-# runtime dependencies. `package.json` lists devDependencies only — Node 24 runs
-# the TypeScript server directly by stripping types, and Vite and React exist
-# solely to build the dashboard bundle. So the build stage installs them, emits
-# `web/dist`, and none of it is copied forward. The runtime image is Node plus
-# this repository's own source.
+# Two stages. The first installs everything and emits `web/dist`; none of that
+# toolchain is copied forward, because Vite, React and TypeScript exist only to
+# build the dashboard. Node runs the server's TypeScript directly by stripping
+# types, so there is no compile step for it and no build output to carry.
+#
+# The runtime stage is this repository's own source plus the two dependencies
+# that are genuinely needed at run time — `arctic` (the OAuth flows in
+# server/auth and server/api) and `open` (reached from cli/login.ts, which
+# server/bin/fest.ts imports statically). `--omit=dev` is what keeps the rest
+# out.
+#
+# No credential is ever copied in. `.env` is excluded by .dockerignore and
+# injected at run time by compose's `env_file`, so it stays out of the image
+# layers — a secret baked into a layer is readable by anyone who can pull it.
 
 FROM node:24-alpine AS build
 WORKDIR /app
@@ -20,9 +28,15 @@ FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY package.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
 COPY server ./server
 COPY shared ./shared
+# cli/ is not optional here: server/bin/fest.ts imports it at the top level, so
+# without it every command in this image fails to resolve, not just the
+# developer ones.
+COPY cli ./cli
 COPY --from=build /app/web/dist ./web/dist
 
 # The database and the JSONL trail live on a volume. Created and owned before
