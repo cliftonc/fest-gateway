@@ -19,7 +19,11 @@ step — the server has none.
 - `src/components/live/` — the live screen's aggregate widgets: the scrolling
   pulse, the ranked rollup boards, the connection indicator.
 - `src/components/` — shared UI: the chart wrappers (`charts.tsx`), small
-  primitives (`ui.tsx`).
+  primitives (`ui.tsx`), the copyable command row (`CopyCommand.tsx`), and
+  `SetupCli.tsx` — the "point Claude Code at Fest" panel. Its open/closed state
+  is a hook (`useSetupCli`) rather than internal state because the toggle
+  renders in `App.tsx`'s page header while the panel renders below it; it opens
+  by default only for a reader with no traffic in the last 30 days.
 - `src/lib/` — the non-visual layer: `api.ts` (fetch wrappers typed against
   `shared/api.ts`), `auth.ts` (session calls), `sse.ts` (the live feed),
   `router.ts`, `range.ts`, `format.ts`, `theme.tsx` (light/dark, class on

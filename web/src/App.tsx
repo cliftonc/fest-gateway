@@ -34,6 +34,7 @@ import { ErrorsPage } from "./pages/Errors.tsx";
 import { AdminPage } from "./pages/Admin.tsx";
 import { LoginPage } from "./pages/Login.tsx";
 import { fetchMe, logout } from "./lib/auth.ts";
+import { SetupCliPanel, SetupCliToggle, useSetupCli } from "./components/SetupCli.tsx";
 
 export function App(): React.JSX.Element {
   const queryClient = useQueryClient();
@@ -119,13 +120,14 @@ function Dashboard({
   user,
   onSignedOut,
 }: {
-  user: { email: string; role: string } | undefined;
+  user: { id: string; email: string; role: string } | undefined;
   onSignedOut: () => void;
 }): React.JSX.Element {
   const page = usePage();
   const [rangeId, setRangeId] = useState(DEFAULT_RANGE_ID);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const range = rangeFor(rangeId);
+  const setup = useSetupCli(user?.id);
 
   // The live feed is its own clock; a range picker on it would imply it shows
   // history, which it does not. Routing is config, not traffic — a range there
@@ -190,26 +192,34 @@ function Dashboard({
         <div className="max-w-[1400px] px-6 pt-5 pb-15">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <h1 className="text-xl font-semibold">{PAGE_TITLES[page]}</h1>
-          {showRange && (
-            <div className="flex flex-wrap items-center gap-2">
-              <label htmlFor="range" className="text-xs text-muted-foreground">
-                Range
-              </label>
-              <Select value={rangeId} onValueChange={setRangeId}>
-                <SelectTrigger id="range" size="sm" className="w-[150px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {RANGE_OPTIONS.map((o) => (
-                    <SelectItem key={o.id} value={o.id}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {setup !== null && <SetupCliToggle state={setup} />}
+            {showRange && (
+              <>
+                <label htmlFor="range" className="ml-1 text-xs text-muted-foreground">
+                  Range
+                </label>
+                <Select value={rangeId} onValueChange={setRangeId}>
+                  <SelectTrigger id="range" size="sm" className="w-[150px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RANGE_OPTIONS.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* Above the page, not inside one: a developer with no traffic has
+            nothing to read on any screen, so the instructions should not depend
+            on which one they happened to open. */}
+        {setup !== null && <SetupCliPanel state={setup} />}
 
         {page === "live" && <LivePage />}
         {page === "routing" && <RoutingPage />}
