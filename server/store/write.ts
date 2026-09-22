@@ -83,7 +83,7 @@ INSERT INTO requests (
   stream, status, http_status, error_type, error_message, partial,
   input_tokens, cache_read_tokens, cache_write_5m_tokens, cache_write_1h_tokens,
   output_tokens, web_searches, service_tier,
-  cost_usd, cost_basis,
+  cost_usd, cost_basis, notional_cost_usd,
   ttfb_ms, duration_ms, bytes_in, bytes_out,
   upstream_request_id,
   rl_status, rl_5h_utilization, rl_5h_status, rl_5h_reset_at,
@@ -100,7 +100,7 @@ INSERT INTO requests (
   :stream, :status, :http_status, :error_type, :error_message, :partial,
   :input_tokens, :cache_read_tokens, :cache_write_5m_tokens, :cache_write_1h_tokens,
   :output_tokens, :web_searches, :service_tier,
-  :cost_usd, :cost_basis,
+  :cost_usd, :cost_basis, :notional_cost_usd,
   :ttfb_ms, :duration_ms, :bytes_in, :bytes_out,
   :upstream_request_id,
   :rl_status, :rl_5h_utilization, :rl_5h_status, :rl_5h_reset_at,
@@ -122,6 +122,8 @@ const ADDITIVE_COLUMNS = [
   "cost_usd",
   "unpriced_requests",
   "subscription_requests",
+  "notional_cost_usd",
+  "notional_unpriced_requests",
   "duration_ms_sum",
   "ttfb_ms_sum",
   "ttfb_count",
@@ -201,6 +203,7 @@ function requestParams(orgId: string, record: UsageRecord): Params {
     service_tier: nullable(usage.serviceTier),
     cost_usd: nullable(record.costUsd),
     cost_basis: record.costBasis,
+    notional_cost_usd: nullable(record.notionalCostUsd),
     ttfb_ms: nullable(record.ttfbMs),
     duration_ms: record.durationMs,
     bytes_in: record.bytesIn,
@@ -254,6 +257,16 @@ function rollupParams(orgId: string, record: UsageRecord): Params[] {
   // precisely the silent understatement this split exists to prevent.
   const unpricedRequests = !priced && !isSubscription ? 1 : 0;
 
+  // Notional value runs on its own books, and the asymmetry is the whole point:
+  // subscription rows are EXCLUDED from cost_usd and INCLUDED here. A model
+  // with no published rate is unknown on both, so it gets the same
+  // lower-bound counter treatment, keyed off `!notionalPriced` for the same
+  // NaN reason as above.
+  const notionalPriced =
+    typeof record.notionalCostUsd === "number" && Number.isFinite(record.notionalCostUsd);
+  const notionalCostUsd = notionalPriced ? (record.notionalCostUsd ?? 0) : 0;
+  const notionalUnpricedRequests = notionalPriced ? 0 : 1;
+
   const bucket = latencyBucket(record.durationMs);
   // ttfb is only summed when it exists, so `ttfb_ms_sum / ttfb_count` is an
   // average over requests that actually produced a first byte rather than one
@@ -276,6 +289,8 @@ function rollupParams(orgId: string, record: UsageRecord): Params[] {
     cost_usd: costUsd ?? 0,
     unpriced_requests: unpricedRequests,
     subscription_requests: subscriptionRequests,
+    notional_cost_usd: notionalCostUsd,
+    notional_unpriced_requests: notionalUnpricedRequests,
     duration_ms_sum: record.durationMs,
     duration_ms_max: record.durationMs,
     ttfb_ms_sum: hasTtfb ? (record.ttfbMs ?? 0) : 0,

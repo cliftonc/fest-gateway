@@ -26,7 +26,7 @@ import {
 } from "./components/ui/select.tsx";
 import { RoutingPage } from "./pages/Routing.tsx";
 import { LivePage } from "./pages/Live.tsx";
-import { OverviewPage } from "./pages/Overview.tsx";
+import { StatsPage } from "./pages/Stats.tsx";
 import { UsersPage } from "./pages/Users.tsx";
 import { ModelsPage } from "./pages/Models.tsx";
 import { ErrorsPage } from "./pages/Errors.tsx";
@@ -201,7 +201,7 @@ function Dashboard({
 
         {page === "live" && <LivePage />}
         {page === "routing" && <RoutingPage range={range} />}
-        {page === "overview" && <OverviewPage range={range} />}
+        {page === "stats" && <StatsPage range={range} />}
         {page === "users" && <UsersPage range={range} />}
         {page === "models" && <ModelsPage range={range} />}
         {page === "errors" && <ErrorsPage range={range} />}

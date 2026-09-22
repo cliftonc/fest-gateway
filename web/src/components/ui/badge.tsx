@@ -27,6 +27,7 @@ const badgeVariants = cva(
         warn: "border-current bg-transparent text-status-warn",
         bad: "border-current bg-transparent text-status-bad",
         info: "border-current bg-transparent text-status-info",
+        sub: "border-current bg-transparent text-status-sub",
         muted: "border-current bg-transparent text-muted-foreground",
       },
     },

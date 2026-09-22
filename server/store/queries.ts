@@ -275,6 +275,8 @@ export interface RequestRow {
   /** Null means "no dollar figure applies or is available". Never zero. */
   readonly costUsd: Cost;
   readonly costBasis: CostBasis;
+  /** List-rate VALUE of this call, subscription included. Never org spend. */
+  readonly notionalCostUsd: Cost;
   readonly ttfbMs: number | null;
   readonly durationMs: number;
   readonly rl5hUtilization: number | null;
@@ -332,7 +334,7 @@ const FEED_COLUMNS = `
   r.stream, r.partial,
   r.input_tokens, r.cache_read_tokens, r.cache_write_5m_tokens,
   r.cache_write_1h_tokens, r.output_tokens, r.web_searches, r.service_tier,
-  r.cost_usd, r.cost_basis, r.ttfb_ms, r.duration_ms,
+  r.cost_usd, r.cost_basis, r.notional_cost_usd, r.ttfb_ms, r.duration_ms,
   r.rl_5h_utilization, r.rl_claim, r.client_version,
   r.pipeline, r.route_id, r.credentials_considered`;
 
@@ -424,6 +426,7 @@ function toRequestRow(row: Row): RequestRow {
     },
     costUsd: numOrNull(row["cost_usd"]),
     costBasis: str(row["cost_basis"], "none") as CostBasis,
+    notionalCostUsd: numOrNull(row["notional_cost_usd"]),
     ttfbMs: numOrNull(row["ttfb_ms"]),
     durationMs: num(row["duration_ms"]),
     rl5hUtilization: numOrNull(row["rl_5h_utilization"]),
@@ -477,6 +480,17 @@ export interface UsageTotals {
   readonly unpricedRequests: number;
   /** Rows the developer's own subscription absorbed: real usage, no org spend. */
   readonly subscriptionRequests: number;
+  /**
+   * List-rate VALUE of all usage in this slice, subscription included.
+   *
+   * Deliberately NOT comparable to `pricedCostUsd` and never addable to it:
+   * that is spend, this is what the work was worth. A slice of pure
+   * subscription traffic has `pricedCostUsd: 0` and a large figure here, and
+   * both are correct.
+   */
+  readonly notionalCostUsd: number;
+  /** Rows with no published rate. Non-zero makes `notionalCostUsd` a lower bound. */
+  readonly notionalUnpricedRequests: number;
   readonly cacheHitRatio: number | null;
 }
 
@@ -511,7 +525,13 @@ const RAW_AGG = `
   COALESCE(SUM(CASE WHEN r.cost_usd IS NULL AND r.cost_basis <> 'subscription'
                     THEN 1 ELSE 0 END), 0) AS unpriced_requests,
   COALESCE(SUM(CASE WHEN r.cost_basis = 'subscription' THEN 1 ELSE 0 END), 0)
-    AS subscription_requests`;
+    AS subscription_requests,
+  -- Note the asymmetry with priced_cost_usd above, which is the entire point of
+  -- the column: spend EXCLUDES subscription rows, value INCLUDES them. These
+  -- two sums are never added to one another anywhere in this codebase.
+  COALESCE(SUM(r.notional_cost_usd), 0) AS notional_cost_usd,
+  COALESCE(SUM(CASE WHEN r.notional_cost_usd IS NULL THEN 1 ELSE 0 END), 0)
+    AS notional_unpriced_requests`;
 
 /**
  * The same three cost figures, rollup flavour. `usage_hourly.cost_usd` is
@@ -529,7 +549,9 @@ const ROLLUP_AGG = `
   COALESCE(SUM(h.web_searches), 0) AS web_searches,
   COALESCE(SUM(h.cost_usd), 0) AS priced_cost_usd,
   COALESCE(SUM(h.unpriced_requests), 0) AS unpriced_requests,
-  COALESCE(SUM(h.subscription_requests), 0) AS subscription_requests`;
+  COALESCE(SUM(h.subscription_requests), 0) AS subscription_requests,
+  COALESCE(SUM(h.notional_cost_usd), 0) AS notional_cost_usd,
+  COALESCE(SUM(h.notional_unpriced_requests), 0) AS notional_unpriced_requests`;
 
 function makeTotals(
   parts: {
@@ -539,6 +561,8 @@ function makeTotals(
     pricedCostUsd: number;
     unpricedRequests: number;
     subscriptionRequests: number;
+    notionalCostUsd: number;
+    notionalUnpricedRequests: number;
   },
 ): UsageTotals {
   return {
@@ -565,6 +589,8 @@ function toTotals(row: Row): UsageTotals {
     pricedCostUsd: num(row["priced_cost_usd"]),
     unpricedRequests: num(row["unpriced_requests"]),
     subscriptionRequests: num(row["subscription_requests"]),
+    notionalCostUsd: num(row["notional_cost_usd"]),
+    notionalUnpricedRequests: num(row["notional_unpriced_requests"]),
   });
 }
 
@@ -590,6 +616,8 @@ function subtractTotals(total: UsageTotals, parts: readonly UsageTotals[]): Usag
     pricedCostUsd: total.pricedCostUsd,
     unpricedRequests: total.unpricedRequests,
     subscriptionRequests: total.subscriptionRequests,
+    notionalCostUsd: total.notionalCostUsd,
+    notionalUnpricedRequests: total.notionalUnpricedRequests,
   };
   for (const p of parts) {
     acc.requests -= p.requests;
@@ -603,6 +631,8 @@ function subtractTotals(total: UsageTotals, parts: readonly UsageTotals[]): Usag
     acc.pricedCostUsd -= p.pricedCostUsd;
     acc.unpricedRequests -= p.unpricedRequests;
     acc.subscriptionRequests -= p.subscriptionRequests;
+    acc.notionalCostUsd -= p.notionalCostUsd;
+    acc.notionalUnpricedRequests -= p.notionalUnpricedRequests;
   }
   return makeTotals({
     requests: acc.requests,
@@ -620,6 +650,8 @@ function subtractTotals(total: UsageTotals, parts: readonly UsageTotals[]): Usag
     // number on the page.
     pricedCostUsd: Math.max(acc.pricedCostUsd, 0),
     unpricedRequests: acc.unpricedRequests,
+    notionalCostUsd: Math.max(acc.notionalCostUsd, 0),
+    notionalUnpricedRequests: acc.notionalUnpricedRequests,
     subscriptionRequests: acc.subscriptionRequests,
   });
 }

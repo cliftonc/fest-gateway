@@ -23,7 +23,12 @@
  *   fest login [--provider google|github] [--server <url>]
  *                                     sign in via OAuth, store a token in ~/.fest
  *   fest whoami                       show the locally stored login
- *   fest claude [-- claude args...]   run `claude` pointed at your Fest gateway
+ *   fest claude [gw] [-- claude args...]
+ *                                     run `claude` pointed at your Fest gateway.
+ *                                     Posture is auto-detected: your own Anthropic
+ *                                     login pays if you have one, org credentials
+ *                                     if you do not. `gw` forces org credentials
+ *                                     and the gateway model menu.
  *   fest logout                       forget the local login
  */
 
@@ -46,6 +51,7 @@ import { generatePassword } from "../auth/password.ts";
 import { recordAudit } from "../store/audit.ts";
 import { createRequestWriter } from "../store/write.ts";
 import { startRetention, DEFAULT_RETENTION } from "../store/retention.ts";
+import { loadPrices, startPriceRefresh, pricingOptionsFromEnv } from "../usage/prices/refresh.ts";
 import { seed, existingRequestCount, isDefaultDatabase } from "../store/seed.ts";
 import { parseRouteTable, EMPTY_ROUTE_TABLE } from "../routes/table.ts";
 import { watchRoutes } from "../routes/watch.ts";
@@ -123,6 +129,14 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     );
   }
 
+  // Prices load synchronously from the vendored snapshot before the first
+  // request can arrive, so a call is never metered against an empty table. The
+  // refresh that follows is best-effort and off the hot path — see
+  // usage/prices/refresh.ts for why boot must never wait on it.
+  const pricing = pricingOptionsFromEnv(cfg.dbPath);
+  loadPrices(pricing);
+  const priceRefresh = startPriceRefresh(pricing);
+
   const writer = createRequestWriter(store);
   const lastUsed = createLastUsedTracker(store);
   // Hourly sweep, on a timer rather than at boot: a restart loop must not turn
@@ -175,6 +189,7 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     const finish = (): void => {
       void sink.close().then(() => {
         retention.stop();
+        priceRefresh.stop();
         routeWatcher?.stop();
         lastUsed.stop();
         store.close();
@@ -533,7 +548,7 @@ function printHelp(): void {
       "developer (run on your own machine, no server env needed):\n" +
       "  fest login [--provider google|github] [--server <url>]\n" +
       "  fest whoami\n" +
-      "  fest claude [-- claude args...]\n" +
+      "  fest claude [gw] [-- claude args...]   (gw: force org credentials + gateway models)\n" +
       "  fest logout",
   );
 }
@@ -573,11 +588,17 @@ async function main(): Promise<void> {
         await runWhoami();
         return;
       case "claude": {
+        let claudeArgs = argv.slice(1);
+        // `gw` is the one word this subcommand owns, and only before `--`:
+        // `fest claude -- gw` still forwards `gw` to the child.
+        const posture = claudeArgs[0] === "gw" ? "key" : "auto";
+        if (posture === "key") claudeArgs = claudeArgs.slice(1);
         // `fest claude -- --resume` and `fest claude --resume` are both fine:
-        // this subcommand defines no flags of its own, so a leading `--` is
-        // only ever there by convention and is stripped rather than forwarded.
-        const claudeArgs = argv.slice(1);
-        await runClaude(claudeArgs[0] === "--" ? claudeArgs.slice(1) : claudeArgs);
+        // apart from `gw` this subcommand defines no flags of its own, so a
+        // leading `--` is only ever there by convention and is stripped rather
+        // than forwarded.
+        if (claudeArgs[0] === "--") claudeArgs = claudeArgs.slice(1);
+        await runClaude(claudeArgs, posture);
         return;
       }
       case "logout":

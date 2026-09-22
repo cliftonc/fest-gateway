@@ -56,6 +56,7 @@ function rec(over: RecOverrides = {}): UsageRecord {
     usage: EMPTY_USAGE,
     costUsd: null,
     costBasis: "subscription",
+    notionalCostUsd: null,
     ttfbMs: 120,
     durationMs: 500,
     bytesIn: 10,

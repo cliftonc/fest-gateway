@@ -32,7 +32,7 @@ import {
 import { Alert, AlertDescription } from "../components/ui/alert.tsx";
 import { Legend, useOriginColors, ORIGIN_ORDER, PostureChart } from "../components/charts.tsx";
 import { RoutingCard } from "../components/RoutingCard.tsx";
-import { ORIGIN_LABELS, costTotal, num, originLabel, personLabel, ratio, relative, tokens, when } from "../lib/format.ts";
+import { ORIGIN_LABELS, costTotal, notionalTotal, num, originLabel, personLabel, ratio, relative, tokens, when } from "../lib/format.ts";
 
 /** Above this, a developer is close enough to the wall to warn about. */
 const WARN_AT = 0.8;
@@ -107,6 +107,12 @@ export function RoutingPage({ range }: { range: Range }): React.JSX.Element {
               note="real usage, no org spend"
               tone="muted"
             />
+            <Stat
+              label="Value at list rates"
+              value={totals === undefined ? "—" : notionalTotal(totals)}
+              note="every request, whoever paid"
+              tone="sub"
+            />
           </StatRow>
 
           <PostureChart rows={origins} />
@@ -116,7 +122,7 @@ export function RoutingPage({ range }: { range: Range }): React.JSX.Element {
             ).map((o) => ({ label: ORIGIN_LABELS[o] ?? o, color: originColors[o] ?? "" }))}
           />
 
-          <Table head={["Credential origin", "Requests", "People", "Errors", "Tokens", "Cost"]}>
+          <Table head={["Credential origin", "Requests", "People", "Errors", "Tokens", "Cost", "At list rates"]}>
             {origins.map((row) => (
               <TableRow key={row.credentialOrigin}>
                 <TableCell>
@@ -145,6 +151,13 @@ export function RoutingPage({ range }: { range: Range }): React.JSX.Element {
                     costTotal(row)
                   )}
                 </TableCell>
+                {/*
+                  Priced on every row, which is what makes this table a
+                  comparison: a substituted row shows what the org actually paid
+                  next to what the same tokens were worth, and a subscription row
+                  shows value against a cost column that reads "subscription".
+                */}
+                <TableCell className="num text-status-sub">{notionalTotal(row)}</TableCell>
               </TableRow>
             ))}
           </Table>

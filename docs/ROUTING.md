@@ -36,6 +36,41 @@ traffic back onto developers' subscriptions.
 }
 ```
 
+## The one exception: an `anthropic` upstream is a default
+
+An upstream on the `anthropic` adapter is Anthropic's own API on a key the
+*server* holds. Defining one makes it the destination for every Anthropic model
+no route claims — but **only for requests with no caller credential**, i.e. the
+key posture, where pass-through cannot serve anything at all and the alternative
+is a first-message 401.
+
+```jsonc
+{
+  "upstreams": {
+    "anthropic": {
+      "adapter": "anthropic",
+      "baseUrl": "https://api.anthropic.com",
+      // NOT named ANTHROPIC_API_KEY: that name belongs in a developer's shell,
+      // where it silently demotes them off their own subscription.
+      "credential": "{env:ANTHROPIC_ORG_API_KEY}"
+    }
+  },
+  "routes": []
+}
+```
+
+That is the whole config — no route per model id, and an `anthropic` upstream is
+exempt from the "nothing routes here" validation error for that reason. It is
+identified by *adapter*, not by the id an operator typed, because the adapter is
+what makes it a safe default.
+
+It does not weaken the section above. A subscription-posture request still
+passes through on its own credential (`resolveRoute` is posture-blind and this
+fallback is not reachable from there — see `resolveWithoutCallerCredential`), an
+explicit route still wins, an `upstream: null` carve-out is still honoured, and a
+non-Anthropic id is still never sent to Anthropic. What it changes is only the
+case that had no good outcome: org-key traffic for a model nobody mapped.
+
 ## Where the keys go
 
 In a `.env` file in the repo root. `npm start`, `npm run dev` and `npm run demo`

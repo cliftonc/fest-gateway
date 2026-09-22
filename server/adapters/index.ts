@@ -24,6 +24,21 @@ export interface AdapterRequest {
   readonly body: Uint8Array<ArrayBuffer>;
   /** The model to send, after any route rewrite. */
   readonly servedModel: string | null;
+  /**
+   * The inbound `anthropic-beta` value, verbatim, or null.
+   *
+   * This is the ONLY inbound header an adapter sees, and the narrowness is the
+   * point: a plan is built from scratch precisely so a caller's credential
+   * cannot be copied onto it by accident, and handing over the whole header bag
+   * would turn that structural guarantee back into a matter of discipline.
+   *
+   * It is here because Claude Code's body is shaped by these flags — it sends
+   * top-level `context_management`, `output_config` and `safeguards`, and
+   * Anthropic's API rejects an unrecognised top-level field outright
+   * (`400 context_management: Extra inputs are not permitted`). A provider that
+   * does not understand Anthropic betas should ignore this.
+   */
+  readonly betas: string | null;
   readonly stream: boolean;
   readonly secret: NonPersistable<string>;
   readonly upstream: Upstream;

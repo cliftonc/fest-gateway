@@ -14,6 +14,10 @@ the server, not shipped in the Docker image, not part of the `web/` build.
 - `extract-gateway-doc.mjs` — pulls `claude gateway --help`'s output for
   reference, since that's Anthropic's own self-hostable gateway and worth
   comparing Fest against periodically.
+- `prices-sync.ts` — `npm run prices:sync`, regenerates the vendored price
+  snapshot from litellm. Prints a diff of every changed rate: the output is the
+  reviewable part of a commit whose payload is a 66KB binary blob. See
+  `docs/PRICING.md`.
 
 ## Maintaining this
 

@@ -136,6 +136,7 @@ export async function handleMessages(
       usage: EMPTY_USAGE,
       costUsd: null,
       costBasis: "none",
+      notionalCostUsd: null,
       ttfbMs: null,
       durationMs: Date.now() - startedAt,
       bytesIn: 0,
@@ -285,6 +286,7 @@ export async function handleMessages(
       usage,
       costUsd: priced.cost,
       costBasis: priced.basis,
+      notionalCostUsd: priced.notionalCost,
       bytesOut: Buffer.byteLength(text),
     });
     return;
@@ -339,6 +341,7 @@ export async function handleMessages(
       usage,
       costUsd: priced.cost,
       costBasis: priced.basis,
+      notionalCostUsd: priced.notionalCost,
       ttfbMs: result.ttfbMs,
       bytesOut: result.bytesOut,
       ...(streamErr ? { errorType: streamErr.type, errorMessage: streamErr.message } : {}),
@@ -366,6 +369,7 @@ export async function handleMessages(
       usage,
       costUsd: priced.cost,
       costBasis: priced.basis,
+      notionalCostUsd: priced.notionalCost,
       errorType: "api_error",
       errorMessage: String(err).slice(0, 200),
     });

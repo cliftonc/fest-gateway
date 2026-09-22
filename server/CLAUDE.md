@@ -48,7 +48,11 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   `ensureUser`, idempotent), `audit.ts`, `retention.ts`, `seed.ts`.
 - **`usage/`** — `accumulator.ts` (SSE usage events, last-wins on
   `output_tokens`, never summed), `cost.ts` (null-propagating cost algebra —
-  `null` means unavailable, never zero), `pricing.ts` (the rate table).
+  `null` means unavailable, never zero), `pricing.ts` (prices one call, and
+  returns BOTH org spend and notional list-rate value), `prices/` (the vendored
+  litellm catalog, its lookup table and its background refresh). Boot loads the
+  snapshot synchronously; the refresh is best-effort and never blocks a
+  request. See `docs/PRICING.md` before changing anything in there.
 - **`credentials/`** — resolves a routing table's `{env:NAME}` references to
   actual secrets at request time; the routing table itself never holds one.
 - **`ingest/`** — `sink.ts` (the bounded queue + batched writer) and

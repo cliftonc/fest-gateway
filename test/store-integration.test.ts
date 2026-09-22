@@ -52,6 +52,7 @@ function rec(over: Partial<UsageRecord>): UsageRecord {
     usage: { ...EMPTY_USAGE, inputTokens: 10, outputTokens: 5 },
     costUsd: null,
     costBasis: "subscription",
+    notionalCostUsd: null,
     ttfbMs: 100,
     durationMs: 1000,
     bytesIn: 1,

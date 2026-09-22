@@ -61,6 +61,7 @@ export function buildRecord(
     usage: EMPTY_USAGE,
     costUsd: null,
     costBasis: "none",
+    notionalCostUsd: null,
     ttfbMs: null,
     durationMs: Date.now() - base.startedAt,
     bytesIn: 0,

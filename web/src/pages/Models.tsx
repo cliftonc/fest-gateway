@@ -13,7 +13,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Range } from "../lib/api.ts";
 import { Card, Muted, QueryState, Table, TableCell, TableRow } from "../components/ui.tsx";
-import { costTotal, modelLabel, num, ratio, tokens } from "../lib/format.ts";
+import { costTotal, modelLabel, notionalTotal, num, ratio, tokens } from "../lib/format.ts";
 
 export function ModelsPage({ range }: { range: Range }): React.JSX.Element {
   const models = useQuery({
@@ -26,7 +26,7 @@ export function ModelsPage({ range }: { range: Range }): React.JSX.Element {
   return (
     <Card
       title="Usage by model"
-      subtitle="Token buckets are disjoint billing buckets — input excludes cache reads and writes — so the columns add up to context, not to a double count."
+      subtitle="Token buckets are disjoint billing buckets — input excludes cache reads and writes — so the columns add up to context, not to a double count. “At list rates” prices every request, including the subscription ones org spend excludes."
     >
       <QueryState isPending={models.isPending} error={models.error} isEmpty={rows.length === 0}>
         <Table
@@ -40,6 +40,7 @@ export function ModelsPage({ range }: { range: Range }): React.JSX.Element {
             "Output",
             "Cache hit",
             "Org spend",
+            "At list rates",
           ]}
         >
           {rows.map((row) => (
@@ -57,6 +58,7 @@ export function ModelsPage({ range }: { range: Range }): React.JSX.Element {
               <TableCell className="num">
                 {row.subscriptionRequests === row.requests ? <Muted>none</Muted> : costTotal(row)}
               </TableCell>
+              <TableCell className="num text-status-sub">{notionalTotal(row)}</TableCell>
             </TableRow>
           ))}
         </Table>

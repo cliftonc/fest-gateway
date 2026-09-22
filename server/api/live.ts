@@ -54,6 +54,7 @@ export function toLiveRow(rec: UsageRecord): LiveRowWire {
     usage: rec.usage,
     costUsd: rec.costUsd,
     costBasis: rec.costBasis,
+    notionalCostUsd: rec.notionalCostUsd,
     ttfbMs: rec.ttfbMs,
     durationMs: rec.durationMs,
     rl5hUtilization: rec.rateLimit?.fiveHourUtilization ?? null,

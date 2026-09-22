@@ -41,12 +41,35 @@ export function cost(usd: number | null): string {
  * `unpricedRequests > 0` it is a lower bound and must be shown as one. The
  * subscription count is never folded in: that usage was real and cost the org
  * nothing, and adding it as $0 would drag every average down.
+ *
+ * The `≥` carries that on its own; the count of unpriced requests used to be
+ * spelled out next to it and was just noise on a dashboard read at a glance.
+ * Dropping the `≥` too would be the real mistake — it presents a lower bound as
+ * an exact figure.
  */
 export function costTotal(
   t: Pick<UsageTotalsWire, "pricedCostUsd" | "unpricedRequests">,
 ): string {
   const base = `$${t.pricedCostUsd.toFixed(4)}`;
-  return t.unpricedRequests > 0 ? `≥ ${base} (+${t.unpricedRequests} n/a)` : base;
+  return t.unpricedRequests > 0 ? `≥ ${base}` : base;
+}
+
+/**
+ * Notional VALUE — what usage would have cost at published API rates, with
+ * subscription work included.
+ *
+ * A third thing again, and the reason it gets its own function rather than an
+ * argument to `costTotal`: `pricedCostUsd` is an invoice, this is what the work
+ * was worth. Prefixed with `~` and never rendered without a label saying so,
+ * because a bare dollar figure on a dashboard is read as money owed. Never add
+ * it to a spend total — a team on Max seats shows $0 spend and a large figure
+ * here, and both are true.
+ */
+export function notionalTotal(
+  t: Pick<UsageTotalsWire, "notionalCostUsd" | "notionalUnpricedRequests">,
+): string {
+  const base = `~$${t.notionalCostUsd.toFixed(2)}`;
+  return t.notionalUnpricedRequests > 0 ? `≥ ${base}` : base;
 }
 
 export const ratio = (r: number | null): string => (r === null ? "n/a" : pct.format(r));

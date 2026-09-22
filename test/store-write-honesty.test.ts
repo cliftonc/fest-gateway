@@ -40,6 +40,7 @@ function rec(over: Partial<UsageRecord>): UsageRecord {
     usage: { ...EMPTY_USAGE, inputTokens: 10, outputTokens: 5 },
     costUsd: null,
     costBasis: "subscription",
+    notionalCostUsd: null,
     ttfbMs: 100,
     durationMs: 1000,
     bytesIn: 1,
@@ -72,6 +73,8 @@ function orgTotals(store: any, orgId: string) {
     .prepare(
       `SELECT sum(requests) AS requests, sum(cost_usd) AS cost,
               sum(unpriced_requests) AS unpriced, sum(subscription_requests) AS subs,
+              sum(notional_cost_usd) AS notional,
+              sum(notional_unpriced_requests) AS notional_unpriced,
               sum(input_tokens) AS input, sum(output_tokens) AS output
          FROM usage_hourly WHERE org_id = ? AND user_id = '' AND served_model = ''`,
     )
@@ -159,4 +162,62 @@ test("rollups always equal raw rows for a mixed batch", (t) => {
     )
     .get(orgId) as { c: number | null };
   assert.equal(rolledCacheRead.c, raw["cacheRead"]);
+});
+
+// ── Notional value: the second set of books ──────────────────────────────────
+
+test("subscription usage contributes value but never a penny of spend", (t) => {
+  const { store, orgId, writer } = setup(t);
+  writer.writeBatch(orgId, [
+    rec({ costUsd: null, costBasis: "subscription", notionalCostUsd: 2.5 }),
+    rec({ costUsd: null, costBasis: "subscription", notionalCostUsd: 1.5 }),
+  ]);
+
+  const totals = orgTotals(store, orgId);
+  // The whole point of the split, asserted in both directions: a team running
+  // entirely on their own subscriptions owes nothing and is still doing $4 of
+  // work an hour. Either number alone is misleading.
+  assert.equal(totals["cost"], 0, "subscription usage is never org spend");
+  assert.equal(totals["notional"], 4);
+  assert.equal(totals["subs"], 2);
+  assert.equal(totals["unpriced"], 0);
+  assert.equal(totals["notional_unpriced"], 0);
+});
+
+test("a priced request lands in BOTH books, at the same figure", (t) => {
+  const { store, orgId, writer } = setup(t);
+  writer.writeBatch(orgId, [
+    rec({
+      costUsd: 0.25,
+      costBasis: "list",
+      notionalCostUsd: 0.25,
+      credentialOrigin: "inbound_key",
+      posture: "key",
+    }),
+  ]);
+
+  const totals = orgTotals(store, orgId);
+  // Metered traffic was both spent and worth the same thing. Only subscription
+  // rows make the two columns diverge.
+  assert.equal(totals["cost"], 0.25);
+  assert.equal(totals["notional"], 0.25);
+});
+
+test("an unpriceable model is n/a on the value books too, never zero", (t) => {
+  const { store, orgId, writer } = setup(t);
+  writer.writeBatch(orgId, [
+    rec({ costUsd: null, costBasis: "subscription", notionalCostUsd: null }),
+    // Non-finite, the same trap the spend column guards against: it must land
+    // in the n/a count rather than being excluded from both.
+    rec({ costUsd: null, costBasis: "subscription", notionalCostUsd: Number.NaN }),
+    rec({ costUsd: null, costBasis: "subscription", notionalCostUsd: 3 }),
+  ]);
+
+  const totals = orgTotals(store, orgId);
+  assert.equal(totals["notional"], 3, "only the priceable row contributes");
+  assert.equal(
+    totals["notional_unpriced"],
+    2,
+    "without this count the $3 total would look complete while omitting two rows",
+  );
 });

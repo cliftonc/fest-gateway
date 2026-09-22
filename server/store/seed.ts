@@ -14,8 +14,10 @@
  * What it deliberately reproduces, because these are the cases the UI must get
  * right and a happy-path generator would never produce:
  *
- *  - subscription rows with `costUsd: null` — the thing that must never render
- *    as `$0.00` or be summed into org spend;
+ *  - subscription rows with `costUsd: null` and a populated `notionalCostUsd` —
+ *    no org spend, but real value; the first must never render as `$0.00` or be
+ *    summed into org spend, and the second must never be summed into it either;
+ *  - rows with no resolved model, which are unpriced on BOTH figures;
  *  - a few `fallback_server` rows — real org spend, which the posture screen is
  *    supposed to shout about;
  *  - unattributed rows with no `userId` — somebody running without a token;
@@ -26,6 +28,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { UsageRecord } from "../../shared/types.ts";
+import { priceUsage } from "../usage/pricing.ts";
 import type { Store } from "./db.ts";
 import { createRequestWriter } from "./write.ts";
 import { ensureOrg, ensureUser } from "./bootstrap.ts";
@@ -118,6 +121,19 @@ export function generateRecords(opts: SeedOptions): UsageRecord[] {
     const ttfbMs = 400 + Math.floor(rand() * 2_200);
     const durationMs = ttfbMs + Math.floor(rand() * rand() * 70_000);
 
+    // 2% of rows never resolved a model, which is what an unpriceable row looks
+    // like in production — the dashboard must show those as "n/a", not "$0".
+    const servedModel = rand() < 0.02 ? null : pick(MODELS);
+    const usage = {
+      inputTokens,
+      cacheReadTokens: cacheRead,
+      cacheWrite5mTokens: cacheWrite5m,
+      cacheWrite1hTokens: cacheWrite1h,
+      outputTokens,
+      webSearches: 0,
+    };
+    const priced = priceUsage(servedModel, usage, subscription);
+
     // Utilisation climbs through the window, so the quota panel has both a
     // comfortable developer and one close to the wall.
     const util = Math.min(0.99, 0.15 + (1 - ageHours / hours) * rand() * 1.1);
@@ -135,25 +151,21 @@ export function generateRecords(opts: SeedOptions): UsageRecord[] {
       credentialOrigin,
       sessionId: `sess-${Math.floor(i / 12)}`,
       requestedModel: pick(MODELS),
-      servedModel: rand() < 0.02 ? null : pick(MODELS),
+      servedModel,
       upstream: "https://api.anthropic.com",
       stream: true,
       status,
       httpStatus,
       ...(status === "ok" || status === "client_abort" ? {} : { errorType: status }),
       partial: status === "client_abort" || status === "stream_error",
-      usage: {
-        inputTokens,
-        cacheReadTokens: cacheRead,
-        cacheWrite5mTokens: cacheWrite5m,
-        cacheWrite1hTokens: cacheWrite1h,
-        outputTokens,
-        webSearches: 0,
-      },
-      // A subscription request has NO dollar cost — null, not zero. The writer
-      // prices the rest.
-      costUsd: null,
-      costBasis: subscription ? "subscription" : "list",
+      usage,
+      // Priced through the REAL engine rather than with invented numbers, so
+      // the demo exercises the same null-vs-value behaviour production does: a
+      // subscription row gets `costUsd: null` with a populated notional figure,
+      // and the 2% of rows with no resolved model come out unpriced on both.
+      costUsd: priced.cost,
+      costBasis: priced.basis,
+      notionalCostUsd: priced.notionalCost,
       ttfbMs: status === "identity_denied" ? null : ttfbMs,
       durationMs,
       bytesIn: 1_000 + Math.floor(rand() * 50_000),

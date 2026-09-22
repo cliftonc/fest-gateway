@@ -33,6 +33,7 @@ import { buildDownstreamHeaders } from "../http/headers.ts";
 import { createSseParser } from "../http/sse.ts";
 import { createUsageAccumulator, usageFromJson } from "../usage/accumulator.ts";
 import { priceUsage } from "../usage/pricing.ts";
+import { ADAPTER_PRICE_PROVIDERS } from "../adapters/registry.ts";
 import { pipeWithTee, beginStream } from "../http/pipe.ts";
 import { buildRecord } from "./record.ts";
 import type { RecordBase } from "./record.ts";
@@ -50,6 +51,8 @@ export interface SubstituteRequest {
   readonly considered: readonly CredentialAttempt[];
   readonly body: Uint8Array<ArrayBuffer>;
   readonly path: string;
+  /** Inbound `anthropic-beta`, for the one adapter whose destination honours it. */
+  readonly betas: string | null;
   readonly stream: boolean;
   readonly sink: UsageSink;
 }
@@ -105,6 +108,12 @@ export async function handleSubstitute(
   const upstream = decision.upstream;
   if (upstream === null) throw new Error("substitute pipeline reached with no upstream");
 
+  // The served model here is a provider-native id (`accounts/fireworks/models/…`)
+  // which is ambiguous on its own, so pricing needs to know whose catalog to
+  // look in. Derived from the adapter rather than the upstream id, because an
+  // operator can name an upstream anything they like.
+  const priceProvider = ADAPTER_PRICE_PROVIDERS[upstream.adapter];
+
   const recordBase: RecordBase = {
     ...ctx.base,
     pipeline: "substitute",
@@ -121,6 +130,7 @@ export async function handleSubstitute(
     path: ctx.path,
     body: ctx.body,
     servedModel: decision.servedModel,
+    betas: ctx.betas,
     stream: ctx.stream,
     secret: ctx.secret,
     upstream,
@@ -202,7 +212,7 @@ export async function handleSubstitute(
     }
     // Never `subscription` on this path: a server-held credential is real org
     // spend by definition, whatever the caller presented.
-    const priced = priceUsage(decision.servedModel, usage, false);
+    const priced = priceUsage(decision.servedModel, usage, false, priceProvider);
     res.writeHead(response.status, downstream);
     res.end(text);
     finishWith({
@@ -211,6 +221,7 @@ export async function handleSubstitute(
       usage,
       costUsd: priced.cost,
       costBasis: priced.basis,
+      notionalCostUsd: priced.notionalCost,
       bytesOut: Buffer.byteLength(text),
     });
     return;
@@ -233,7 +244,7 @@ export async function handleSubstitute(
     for (const event of parser.flush()) acc.apply(event);
 
     const usage = acc.snapshot();
-    const priced = priceUsage(decision.servedModel, usage, false);
+    const priced = priceUsage(decision.servedModel, usage, false, priceProvider);
     const streamErr = acc.streamError();
 
     /**
@@ -263,6 +274,7 @@ export async function handleSubstitute(
       usage,
       costUsd: priced.cost,
       costBasis: priced.basis,
+      notionalCostUsd: priced.notionalCost,
       ttfbMs: result.ttfbMs,
       bytesOut: result.bytesOut,
       ...(streamErr ? { errorType: streamErr.type, errorMessage: streamErr.message } : {}),
@@ -270,7 +282,7 @@ export async function handleSubstitute(
   } catch (err) {
     for (const event of parser.flush()) acc.apply(event);
     const usage = acc.snapshot();
-    const priced = priceUsage(decision.servedModel, usage, false);
+    const priced = priceUsage(decision.servedModel, usage, false, priceProvider);
     log.warn("substitute stream failed mid-flight", {
       id: ctx.base.id,
       upstream: upstream.id,
@@ -287,6 +299,7 @@ export async function handleSubstitute(
       usage,
       costUsd: priced.cost,
       costBasis: priced.basis,
+      notionalCostUsd: priced.notionalCost,
       errorType: "api_error",
       errorMessage: String(err).slice(0, 200),
     });

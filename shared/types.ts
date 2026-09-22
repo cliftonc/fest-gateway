@@ -220,6 +220,19 @@ export interface UsageRecord {
   readonly usage: UsagePayload;
   readonly costUsd: number | null;
   readonly costBasis: CostBasis;
+  /**
+   * What this call would have cost at published API rates.
+   *
+   * VALUE, NOT SPEND. On the subscription path `costUsd` is null and this is
+   * populated: the developer's own plan absorbed the call, so there is no org
+   * invoice, but the work still had a market price worth showing. It must never
+   * be summed into, compared against, or substituted for `costUsd` — doing so
+   * fabricates an invoice for money nobody was charged.
+   *
+   * Null means the model has no published rate, so the value is genuinely
+   * unknown. Null is not zero here either.
+   */
+  readonly notionalCostUsd: number | null;
 
   readonly ttfbMs: number | null;
   readonly durationMs: number;

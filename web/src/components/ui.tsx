@@ -37,7 +37,12 @@ import {
 
 export { TableRow, TableCell } from "./ui/table.tsx";
 
-export type Tone = "ok" | "warn" | "bad" | "muted" | "info";
+/**
+ * `sub` is the subscription tone — the same purple the charts use for
+ * subscription-absorbed usage, so "this figure is about developers' own plans"
+ * reads the same way on a stat as it does in a legend.
+ */
+export type Tone = "ok" | "warn" | "bad" | "muted" | "info" | "sub";
 
 /** Tone → text colour, for the places that are not a badge. */
 export const TONE_TEXT: Readonly<Record<Tone, string>> = {
@@ -45,6 +50,7 @@ export const TONE_TEXT: Readonly<Record<Tone, string>> = {
   warn: "text-status-warn",
   bad: "text-status-bad",
   info: "text-status-info",
+  sub: "text-status-sub",
   muted: "text-muted-foreground",
 };
 
@@ -99,7 +105,7 @@ export function Stat({
   label: string;
   value: ReactNode;
   note?: ReactNode;
-  tone?: "ok" | "warn" | "bad" | "muted";
+  tone?: Tone;
 }): React.JSX.Element {
   return (
     <div>

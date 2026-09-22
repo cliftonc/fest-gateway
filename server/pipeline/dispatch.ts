@@ -29,7 +29,11 @@ import { detectInbound } from "../auth/posture.ts";
 import { isSubscriptionCredential } from "../secret/fingerprint.ts";
 import { readBodyBytes, isTooLarge, peekRequest } from "../http/body.ts";
 import { anthropicError, statusForErrorType } from "../http/errors.ts";
-import { resolveRoute } from "../routes/resolve.ts";
+import {
+  resolveRoute,
+  resolveWithoutCallerCredential,
+  defaultAnthropicUpstream,
+} from "../routes/resolve.ts";
 import type { RouteTable } from "../routes/table.ts";
 import { resolveCredential } from "../credentials/resolve.ts";
 import type { SecretResolver } from "../credentials/provider.ts";
@@ -63,7 +67,11 @@ export async function dispatchMessages(
   // The common case by far, and the one that must stay cheapest: no routing
   // config at all means there is nothing to decide, so do not read the body
   // twice or construct a decision just to discard it.
-  if (ctx.routes.routes.length === 0) {
+  //
+  // An `anthropic` upstream counts as routing config even with no routes
+  // pointing at it — it is the default destination for Anthropic models in the
+  // key posture, so there IS a decision to make.
+  if (ctx.routes.routes.length === 0 && defaultAnthropicUpstream(ctx.routes) === null) {
     await handleMessages(req, res, ctx);
     return;
   }
@@ -78,7 +86,17 @@ export async function dispatchMessages(
   }
 
   const peek = peekRequest(body);
-  const decision = resolveRoute(ctx.routes, peek.model);
+  /**
+   * With no caller credential there is nothing to pass through, so an Anthropic
+   * model no route claims falls back to the `anthropic` upstream rather than to
+   * a first-message failure. With one, routing is posture-blind as before —
+   * the developer's own credential serves anything unrouted, and nothing
+   * diverts it onto org spend.
+   */
+  const decision =
+    inbound.upstreamCredential === null
+      ? resolveWithoutCallerCredential(ctx.routes, peek.model)
+      : resolveRoute(ctx.routes, peek.model);
 
   if (decision.pipeline === "passthrough") {
     // Hand the already-read bytes on rather than re-reading a consumed stream.
@@ -153,6 +171,7 @@ export async function dispatchMessages(
     considered: credential.considered,
     body,
     path: inbound.effectivePath,
+    betas: headerValue(req, "anthropic-beta"),
     stream: peek.stream,
     sink: ctx.sink,
   });

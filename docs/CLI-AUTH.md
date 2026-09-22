@@ -112,12 +112,54 @@ kind of persistence.
   `GET /api/auth/identity` (authenticated the same way the proxy path is:
   `Authorization: Bearer` or `X-Fest-Token`, not a cookie) to confirm the token
   hasn't been revoked.
-- **`fest claude [-- claude-args...]`** — requires a prior login, sets
-  `ANTHROPIC_BASE_URL=<serverUrl>/t/<identityToken>`, strips every var in
-  `shared/demotion-vars.ts` from the child environment (the same list
-  `tools/canary.ts` clears for its own test client, and for the identical
+- **`fest claude [gw] [-- claude-args...]`** — requires a prior login, then
+  spawns the real `claude` binary in one of two **postures**. Both strip every
+  var in `shared/demotion-vars.ts` from the child environment first (the same
+  list `tools/canary.ts` clears for its own test client, and for the identical
   reason — an inherited `ANTHROPIC_API_KEY` silently demotes Claude Code off
-  your subscription), then `spawn("claude", ...)`.
+  your subscription).
+
+  | | subscription posture | gateway posture |
+  | --- | --- | --- |
+  | `ANTHROPIC_BASE_URL` | `<serverUrl>/t/<identityToken>` | `<serverUrl>` |
+  | `ANTHROPIC_AUTH_TOKEN` | unset | `<identityToken>` |
+  | who pays | **your own Anthropic plan** | **org credentials** |
+  | `/model` menu | Claude Code's built-ins only | built-ins **+ "From gateway"** |
+
+  **The posture is auto-detected.** `~/.claude.json` has an `oauthAccount` →
+  subscription posture. It does not → gateway posture, because a subscription
+  posture with no subscription behind it cannot work. `fest claude gw` forces
+  gateway posture when you want the gateway menu anyway. There is deliberately
+  no `sub` counterpart: the only case auto-detect sends to gateway is "you have
+  no subscription login", and forcing subscription there could not work. `gw` is
+  only recognised *before* `--`, so `fest claude -- gw` still forwards it to the
+  child.
+
+  Fest prints one line to stderr saying which posture it chose and **who pays**,
+  every time — auto-detection means that is now something Fest asserts rather
+  than something you typed.
+
+  Two things are specific to gateway posture:
+
+  - The gateway menu still needs
+    **`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`** exported on your side —
+    without it Claude Code never calls `/v1/models` at all. Fest reminds you if
+    it is unset.
+  - **Every model you select needs a substitute route.** There is no caller
+    credential to fall back on, so an unrouted model 401s on the first message.
+    `fest claude gw` preflights `GET /v1/models` (3s; a network error is only a
+    warning) and, before spawning, either hard-errors on a `--model` /
+    `ANTHROPIC_MODEL` / settings `model` that is unrouted, or — when it cannot
+    see which model the session will open on — warns about any of Anthropic's
+    base models the gateway cannot serve. A gateway publishing nothing at all is
+    a hard error naming `FEST_ROUTES`.
+
+  In subscription posture Fest also scans `~/.claude/settings{,.local}.json` and
+  `./.claude/settings{,.local}.json` for `apiKeyHelper` or an
+  `env.ANTHROPIC_API_KEY` / `env.ANTHROPIC_AUTH_TOKEN`, **by key only**, and
+  warns loudly if it finds one. No env manipulation can clear those — the client
+  reads its own settings files — so without the warning you would believe you
+  were on your own plan while the session was billed elsewhere.
 - **`fest logout`** — deletes `~/.fest/config.json` only. It does **not**
   revoke the token server-side; that stays an explicit `fest token revoke
   <id>`, an operator action against the database. Logout here means "forget

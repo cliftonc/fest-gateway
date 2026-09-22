@@ -83,6 +83,7 @@ interface Seed {
   readonly httpStatus?: number | null;
   readonly costUsd?: number | null;
   readonly costBasis?: string;
+  readonly notionalCostUsd?: number | null;
   readonly inputTokens?: number;
   readonly cacheReadTokens?: number;
   readonly outputTokens?: number;
@@ -99,11 +100,11 @@ const INSERT_REQUEST = `INSERT INTO requests (
   credential_fingerprint, credential_origin, session_id,
   requested_model, served_model, upstream, stream, status, http_status,
   error_type, partial, input_tokens, cache_read_tokens, output_tokens,
-  cost_usd, cost_basis, ttfb_ms, duration_ms,
+  cost_usd, cost_basis, notional_cost_usd, ttfb_ms, duration_ms,
   rl_status, rl_5h_utilization, rl_5h_status, rl_5h_reset_at,
   rl_7d_utilization, rl_claim, client_version
 ) VALUES (?, ?, ?, ?, ?, 'subscription', 'header', ?, ?, ?, ?, ?, 'api.anthropic.com',
-  0, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  0, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const KEY_COLS = "org_id, hour_start, user_id, served_model, credential_origin, cost_basis";
 const ADD_COLS = [
@@ -115,6 +116,8 @@ const ADD_COLS = [
   "cost_usd",
   "unpriced_requests",
   "subscription_requests",
+  "notional_cost_usd",
+  "notional_unpriced_requests",
   "duration_ms_sum",
   "ttfb_ms_sum",
   "ttfb_count",
@@ -147,6 +150,7 @@ function seedRequest(store: Store, orgId: string, s: Seed): void {
   const durationMs = s.durationMs ?? 500;
   const costBasis = s.costBasis ?? "none";
   const costUsd = s.costUsd === undefined ? null : s.costUsd;
+  const notionalCostUsd = s.notionalCostUsd === undefined ? null : s.notionalCostUsd;
   const inputTokens = s.inputTokens ?? 0;
   const cacheReadTokens = s.cacheReadTokens ?? 0;
   const outputTokens = s.outputTokens ?? 0;
@@ -176,6 +180,7 @@ function seedRequest(store: Store, orgId: string, s: Seed): void {
       outputTokens,
       costUsd,
       costBasis,
+      notionalCostUsd,
       ttfbMs,
       durationMs,
       s.rl5h === null || s.rl5h === undefined ? null : "allowed",
@@ -199,6 +204,8 @@ function seedRequest(store: Store, orgId: string, s: Seed): void {
     priced && !isSub ? costUsd : 0,
     costUsd === null && !isSub ? 1 : 0,
     isSub ? 1 : 0,
+    notionalCostUsd ?? 0,
+    notionalCostUsd === null ? 1 : 0,
     durationMs,
     ttfbMs ?? 0,
     ttfbMs === null ? 0 : 1,

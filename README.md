@@ -199,6 +199,8 @@ the server only ever sees plain HTTP and cannot detect this for itself.
 | `FEST_SECURE_COOKIES` | set behind HTTPS. |
 | `FEST_ROUTES` | routing table path. Absent means everything passes through. |
 | `FEST_UPSTREAM_BASE_URL`, `FEST_LOG_LEVEL` | |
+| `FEST_PRICING_REFRESH` | set `0` to never fetch prices. Rates then come only from the vendored snapshot, which is always sufficient. |
+| `FEST_PRICING_URL` | internal mirror of litellm's price file. |
 | `FEST_GOOGLE_CLIENT_ID`, `FEST_GOOGLE_CLIENT_SECRET` | Google OAuth, for `fest login` and the dashboard. Absent means Google sign-in is off. |
 | `FEST_GITHUB_CLIENT_ID`, `FEST_GITHUB_CLIENT_SECRET` | GitHub OAuth, same idea. |
 | `FEST_ALLOWED_EMAIL_DOMAINS` | comma-separated. **Required to enable OAuth at all** — empty refuses every OAuth login rather than allowing any Google/GitHub account. |

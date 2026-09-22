@@ -14,6 +14,8 @@ duplicates it.
 - `POSTURES.md` — subscription vs. key posture, and why they're mutually
   exclusive with model discovery.
 - `ROUTING.md` — the routing table format and the substitute path.
+- `PRICING.md` — where rate data comes from, the vendored litellm snapshot and
+  its refresh, and the spend-vs-value distinction the whole cost UI rests on.
 - `CLIENT-GATEWAY-PROTOCOL.md` — the wire-level details of what Claude Code
   actually sends (headers, quota, model menu format).
 - `FRONTEND.md` — the dashboard's screens and data flow.

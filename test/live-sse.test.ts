@@ -38,6 +38,7 @@ function record(id: string): UsageRecord {
     usage: { ...EMPTY_USAGE, inputTokens: 5, outputTokens: 2 },
     costUsd: null,
     costBasis: "subscription",
+    notionalCostUsd: null,
     ttfbMs: 900,
     durationMs: 1500,
     bytesIn: 10,

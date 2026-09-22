@@ -36,10 +36,17 @@ for a chart library to do beyond drawing.
 
 ## Rules the UI must not break
 
-- **Never add a dollar figure to subscription usage.** `costUsd` is `null` with
-  `costBasis: "subscription"` on purpose: the developer's own plan absorbed it,
-  so there is no org spend. Render subscription and metered totals side by side,
-  never summed.
+- **Never add a dollar figure to a SPEND total for subscription usage.**
+  `costUsd` stays `null` with `costBasis: "subscription"`: the developer's own
+  plan absorbed it, so there is no org spend. Render subscription and metered
+  totals side by side, never summed.
+- **`notionalCostUsd` is value, not spend, and lives in its own column.** It is
+  what the same call would have cost at published API rates and IS populated for
+  subscription usage — that is the point of it. It has its own formatter
+  (`notionalTotal`, which prefixes `~`), its own labelled column, and must never
+  be added to `pricedCostUsd` or rendered where a reader would take it for an
+  invoice. A team on Max seats shows $0 spend and a large value figure; both are
+  correct. See `docs/PRICING.md`.
 - **Render `null` cost as `n/a`, never `$0.00`.** An unpriceable call is not a
   free call. Where `unpricedRequests > 0`, the total is a lower bound — show it
   as `≥ $12.3456 (+3 n/a)`.

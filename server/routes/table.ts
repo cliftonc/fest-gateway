@@ -304,7 +304,13 @@ export function parseRouteTable(text: string): RouteTable {
   // An upstream nothing routes to is dead config. It is a warning-shaped
   // problem, but it is raised as an error for the same reason as the rest: the
   // operator believes traffic is going there, and it is not.
-  for (const id of upstreams.keys()) {
+  for (const [id, upstream] of upstreams) {
+    // An `anthropic` upstream is reachable with no route pointing at it: it is
+    // the default destination for Anthropic models in the key posture, where
+    // there is no caller credential to pass through. See
+    // `resolveWithoutCallerCredential`. Demanding a route per model id here
+    // would be config whose only purpose is to satisfy this check.
+    if (upstream.adapter === "anthropic") continue;
     if (!routes.some((r) => r.upstream === id)) {
       problems.push(
         `upstream ${JSON.stringify(id)} is defined but no route targets it, so nothing will ever reach it`,

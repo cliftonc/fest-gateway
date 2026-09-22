@@ -32,6 +32,30 @@ test("a subscription row carries no dollar cost — null, never zero", () => {
   }
 });
 
+test("a subscription row still carries what it would have cost", () => {
+  const rows = generateRecords(OPTS).filter(
+    (r) => r.costBasis === "subscription" && r.servedModel !== null,
+  );
+  assert.ok(rows.length > 0);
+  for (const row of rows) {
+    assert.ok(
+      typeof row.notionalCostUsd === "number" && row.notionalCostUsd > 0,
+      "otherwise the demo's headline value figure renders as $0",
+    );
+  }
+});
+
+test("the demo includes rows that are unpriceable on BOTH figures", () => {
+  // The 2% with no resolved model. Without them the demo never shows the "n/a"
+  // path, which is precisely the rendering most likely to be got wrong.
+  const rows = generateRecords(OPTS).filter((r) => r.servedModel === null);
+  assert.ok(rows.length > 0, "the demo must exercise the unpriceable path");
+  for (const row of rows) {
+    assert.equal(row.costUsd, null);
+    assert.equal(row.notionalCostUsd, null);
+  }
+});
+
 test("the demo exercises the cases the UI exists to surface", () => {
   const rows = generateRecords(OPTS);
   const has = (p: (r: (typeof rows)[number]) => boolean): boolean => rows.some(p);

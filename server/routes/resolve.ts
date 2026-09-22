@@ -20,7 +20,15 @@
 import type { Route, RouteTable, Upstream } from "./table.ts";
 
 export interface RouteDecision {
-  /** Null when no route matched; the default pass-through applies. */
+  /**
+   * Null when no route matched; the default pass-through applies.
+   *
+   * Also null on a substitute decision made by `resolveWithoutCallerCredential`,
+   * which routes by adapter rather than by any entry in the file. A record with
+   * `pipeline: "substitute"` and `routeId: null` means exactly that: substituted,
+   * but not by a route an operator wrote — so looking for one in `routes.json`
+   * is not a search worth starting.
+   */
   readonly route: Route | null;
   /** Null on the pass-through path. */
   readonly upstream: Upstream | null;
@@ -108,6 +116,79 @@ export function resolveRoute(table: RouteTable, requestedModel: string | null): 
     upstream,
     requestedModel,
     servedModel: route.model ?? requestedModel,
+    pipeline: "substitute",
+  };
+}
+
+/** Client-visible Anthropic-ish ids — the same filter Claude Code applies. */
+const ANTHROPIC_MODEL = /(claude|anthropic)/i;
+
+/**
+ * The upstream that serves Anthropic models nothing else claims.
+ *
+ * Identified by ADAPTER, not by the id an operator happened to type: the
+ * `anthropic` adapter is by definition "Anthropic's own API on a key the server
+ * holds", and that is the property that makes it a safe default. Naming an
+ * upstream `anthropic` while pointing it somewhere else would otherwise decide
+ * where unrouted traffic goes.
+ */
+export function defaultAnthropicUpstream(table: RouteTable): Upstream | null {
+  for (const upstream of table.upstreams.values()) {
+    if (upstream.adapter === "anthropic") return upstream;
+  }
+  return null;
+}
+
+/**
+ * Resolve for a request that has NO caller credential to pass through.
+ *
+ * This is the key posture: the credential position holds Fest's own identity
+ * token, which is never forwarded, so pass-through cannot serve anything. An
+ * unrouted model there is not "left on the subscription" — there is no
+ * subscription — it is a guaranteed failure on the first message.
+ *
+ * So when the operator has defined an `anthropic` upstream, every Anthropic
+ * model that no route claims is served there, on the org's own key. The
+ * alternative was one exact-match route per model id, which has to be updated
+ * every time Anthropic ships a model and fails silently — as a first-message
+ * 401 — when someone forgets.
+ *
+ * Three things it deliberately does NOT do:
+ *
+ *  - **It never runs in the subscription posture.** That path keeps a caller
+ *    credential, and diverting it to a server-held key would bill the org for
+ *    a request the developer's own plan had already covered. This function is
+ *    reached only where `upstreamCredential === null`, and a plain wildcard
+ *    route in `routes.json` could not express that distinction — `resolveRoute`
+ *    is posture-blind, so `claude-*` -> anthropic would capture subscription
+ *    traffic too. That is why this is code and not config.
+ *  - **It never overrides an explicit route.** A model claimed by any route,
+ *    including an `upstream: null` "keep this on pass-through" carve-out, is
+ *    left exactly where the operator put it.
+ *  - **It never routes a non-Anthropic id.** Sending `gpt-oss-120b` to
+ *    api.anthropic.com buys a confusing 404 from a vendor who never had that
+ *    model, in place of Fest's own message naming the gateway.
+ */
+export function resolveWithoutCallerCredential(
+  table: RouteTable,
+  requestedModel: string | null,
+): RouteDecision {
+  const decision = resolveRoute(table, requestedModel);
+  // Already substituted, or claimed by an explicit route: not ours to redirect.
+  if (decision.pipeline === "substitute" || decision.route !== null) return decision;
+  if (requestedModel === null || requestedModel === "") return decision;
+  if (!ANTHROPIC_MODEL.test(requestedModel)) return decision;
+
+  const upstream = defaultAnthropicUpstream(table);
+  if (upstream === null) return decision;
+
+  return {
+    route: null,
+    upstream,
+    requestedModel,
+    // Anthropic's own id, unchanged. This is a credential substitution, not a
+    // model one: the developer asked for Sonnet and gets Sonnet.
+    servedModel: requestedModel,
     pipeline: "substitute",
   };
 }

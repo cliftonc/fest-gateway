@@ -197,6 +197,132 @@ test("a route without an explicit model keeps the requested id", () => {
   assert.equal(resolveRoute(t, "m").servedModel, "m");
 });
 
+// ── the key-posture default: an `anthropic` upstream ──────────────────────────
+//
+// In the key posture the credential position holds Fest's own identity token,
+// which is never forwarded, so an unrouted model is not "left on the
+// subscription" — there is no subscription. It is a first-message failure. An
+// `anthropic` upstream is the standing answer for every Anthropic model no
+// route claims.
+
+const ORG_ANTHROPIC = {
+  anthropic: {
+    adapter: "anthropic",
+    baseUrl: "https://api.anthropic.com",
+    credential: "{env:ANTHROPIC_ORG_API_KEY}",
+  },
+};
+
+test("an anthropic upstream is not dead config with no route pointing at it", () => {
+  // It is reachable as the key-posture default, so demanding a route per model
+  // id would be config whose only purpose is to satisfy the validator.
+  assert.deepEqual(problems(JSON.stringify({ upstreams: ORG_ANTHROPIC, routes: [] })), []);
+});
+
+test("a non-anthropic upstream nothing routes to is still rejected", () => {
+  const found = problems(config([], UPSTREAM));
+  assert.ok(found.some((p) => /no route targets it/.test(p)), found.join("\n"));
+});
+
+test("an unrouted Anthropic model defaults to the anthropic upstream", async () => {
+  const { resolveWithoutCallerCredential } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(JSON.stringify({ upstreams: ORG_ANTHROPIC, routes: [] }));
+  const d = resolveWithoutCallerCredential(t, "claude-opus-5");
+  assert.equal(d.pipeline, "substitute");
+  assert.equal(d.upstream?.id, "anthropic");
+  assert.equal(d.route, null, "no route made this decision, and none should be named");
+  assert.equal(
+    d.servedModel,
+    "claude-opus-5",
+    "a credential substitution, not a model one: ask for Opus, get Opus",
+  );
+});
+
+test("an explicit route still beats the default", async () => {
+  const { resolveWithoutCallerCredential } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(
+    JSON.stringify({
+      upstreams: { ...UPSTREAM, ...ORG_ANTHROPIC },
+      routes: [
+        { id: "kimi", match: "claude-sonnet-*", upstream: "fireworks", model: "accounts/x/kimi" },
+      ],
+    }),
+  );
+  const d = resolveWithoutCallerCredential(t, "claude-sonnet-5");
+  assert.equal(d.route?.id, "kimi");
+  assert.equal(d.upstream?.id, "fireworks");
+  // ...and everything it does not claim goes to Anthropic.
+  assert.equal(resolveWithoutCallerCredential(t, "claude-opus-5").upstream?.id, "anthropic");
+});
+
+test("an explicit pass-through carve-out is respected, not overridden by the default", async () => {
+  const { resolveWithoutCallerCredential } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(
+    JSON.stringify({
+      upstreams: ORG_ANTHROPIC,
+      routes: [{ id: "hands-off", match: "claude-opus-5", upstream: null }],
+    }),
+  );
+  const d = resolveWithoutCallerCredential(t, "claude-opus-5");
+  assert.equal(d.pipeline, "passthrough", "the operator said no substitution for this id");
+  assert.equal(d.route?.id, "hands-off");
+});
+
+test("a non-Anthropic id is never sent to Anthropic by default", async () => {
+  const { resolveWithoutCallerCredential } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(JSON.stringify({ upstreams: ORG_ANTHROPIC, routes: [] }));
+  // A 404 from a vendor who never had `gpt-oss-120b` is a worse message than
+  // Fest's own, which at least names the gateway.
+  assert.equal(resolveWithoutCallerCredential(t, "gpt-oss-120b").pipeline, "passthrough");
+});
+
+test("an unreadable model is not routed, default or otherwise", async () => {
+  const { resolveWithoutCallerCredential } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(JSON.stringify({ upstreams: ORG_ANTHROPIC, routes: [] }));
+  for (const model of [null, ""]) {
+    assert.equal(resolveWithoutCallerCredential(t, model).pipeline, "passthrough");
+  }
+});
+
+test("with no anthropic upstream the default does not exist", async () => {
+  const { resolveWithoutCallerCredential } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(config([{ id: "oss", match: "gpt-*", upstream: "fireworks" }]));
+  const d = resolveWithoutCallerCredential(t, "claude-opus-5");
+  assert.equal(d.pipeline, "passthrough", "nothing to default to, so behaviour is unchanged");
+  assert.equal(resolveWithoutCallerCredential(EMPTY_ROUTE_TABLE, "claude-opus-5").pipeline, "passthrough");
+});
+
+test("resolveRoute itself never applies the default — that is the subscription guard", async () => {
+  // The whole reason this is code and not a `claude-*` wildcard in the file:
+  // `resolveRoute` is posture-blind, and a request WITH a caller credential
+  // must keep using it. Diverting one onto a server-held key would bill the org
+  // for a turn the developer's own plan had already covered.
+  const t = parseRouteTable(JSON.stringify({ upstreams: ORG_ANTHROPIC, routes: [] }));
+  const d = resolveRoute(t, "claude-opus-5");
+  assert.equal(d.pipeline, "passthrough");
+  assert.equal(d.upstream, null);
+});
+
+test("the refusal names the default rather than a route id of '?'", async () => {
+  const { resolveCredential } = await import("../server/credentials/resolve.ts");
+  const { createEnvResolver } = await import("../server/credentials/provider.ts");
+  const { resolveWithoutCallerCredential } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(JSON.stringify({ upstreams: ORG_ANTHROPIC, routes: [] }));
+  const outcome = resolveCredential(
+    resolveWithoutCallerCredential(t, "claude-opus-5"),
+    null,
+    createEnvResolver({}),
+  );
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.match(outcome.message, /ANTHROPIC_ORG_API_KEY/);
+  assert.equal(
+    /route "\?"/.test(outcome.message),
+    false,
+    "naming a route that was never in the file sends the operator looking for it",
+  );
+});
+
 // ── what the dashboard is allowed to see ──────────────────────────────────────
 
 test("evaluation order is what the dashboard shows, not file order", async () => {

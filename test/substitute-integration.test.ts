@@ -150,6 +150,69 @@ test("a substituted request never carries the inbound Anthropic bearer", async (
   }
 });
 
+test("an Anthropic upstream keeps the beta flags that make the body legal", async () => {
+  // Found in use, as `400 context_management: Extra inputs are not permitted`
+  // on the first message with Opus. Claude Code sends top-level
+  // `context_management` in the body and the beta enabling it in the header;
+  // this adapter built its headers from scratch and dropped the lot, so
+  // Anthropic strict-validated the body and refused the request.
+  const upstream = await mockUpstream(sseResponse);
+  const ORG_KEY = "sk-ant-api03-ORGHELDKEY";
+  const BETAS = "claude-code-20250219, oauth-2025-04-20, context-management-2025-06-27";
+  try {
+    await withFest(
+      {
+        routes: JSON.stringify({
+          upstreams: {
+            anthropic: {
+              adapter: "anthropic",
+              baseUrl: upstream.url,
+              credential: "{env:ANTHROPIC_ORG_API_KEY}",
+            },
+          },
+          routes: [],
+        }),
+        env: { ANTHROPIC_ORG_API_KEY: ORG_KEY },
+      },
+      async (base) => {
+        // No inbound credential: the key posture, where an unrouted Anthropic
+        // model defaults to this upstream.
+        const res = await fetch(`${base}/v1/messages?beta=true`, {
+          method: "POST",
+          headers: { "anthropic-beta": BETAS, "content-type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-opus-5",
+            stream: true,
+            max_tokens: 100,
+            messages: [],
+            context_management: { edits: [] },
+          }),
+        });
+        await res.text();
+
+        const seen = upstream.seen[0];
+        assert.ok(seen !== undefined, "the request reached Anthropic");
+        const betas = String(seen.headers["anthropic-beta"] ?? "");
+        assert.match(betas, /context-management-2025-06-27/, "this is what legalises the body");
+        assert.match(betas, /claude-code-20250219/);
+        assert.equal(
+          betas.includes("oauth-2025-04-20"),
+          false,
+          "we authenticate with x-api-key here; claiming OAuth asserts something untrue",
+        );
+
+        // The body is untouched apart from the model, so the field the betas
+        // authorise is still there to be authorised.
+        assert.match(seen.body, /"context_management"/);
+        assert.equal(seen.headers["x-api-key"], ORG_KEY);
+        assert.equal(seen.headers["authorization"], undefined);
+      },
+    );
+  } finally {
+    await upstream.close();
+  }
+});
+
 test("the model is rewritten and the request reaches the provider's path", async () => {
   const upstream = await mockUpstream(sseResponse);
   try {

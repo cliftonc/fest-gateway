@@ -7,7 +7,10 @@ module. That's the entire reason this directory exists instead of the web
 code importing types straight out of `server/`.
 
 - `types.ts` — the request/usage/SSE/posture/identity/record/quota shapes
-  both the server and its internals agree on.
+  both the server and its internals agree on. Note `UsageRecord` carries two
+  dollar fields: `costUsd` (org spend, null on subscription) and
+  `notionalCostUsd` (list-rate value, populated on subscription). They are
+  never added together — see `docs/PRICING.md`.
 - `api.ts` — the dashboard's wire contract (`MeResponse`, `RequestRowWire`,
   etc). `server/api/routes.ts` asserts every response `satisfies` these
   types, so a renamed or removed field is a `tsc` failure at the route, not

@@ -13,7 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Range } from "../lib/api.ts";
 import { Card, Muted, Pill, QueryState, Table, TableCell, TableRow } from "../components/ui.tsx";
 import { Alert, AlertDescription } from "../components/ui/alert.tsx";
-import { contextTokens, costTotal, num, personLabel, ratio, tokens } from "../lib/format.ts";
+import { contextTokens, costTotal, notionalTotal, num, personLabel, ratio, tokens } from "../lib/format.ts";
 
 export function UsersPage({ range }: { range: Range }): React.JSX.Element {
   const users = useQuery({
@@ -39,7 +39,7 @@ export function UsersPage({ range }: { range: Range }): React.JSX.Element {
 
       <Card
         title="Usage by developer"
-        subtitle="Subscription requests are counted, never priced: they consumed a developer's own rate-limit window rather than org budget."
+        subtitle="Subscription requests are counted but never billed: they consumed a developer's own rate-limit window rather than org budget. “At list rates” is what that work would have cost on the API — value, not spend, and never added to it."
       >
         <QueryState
           isPending={users.isPending}
@@ -56,6 +56,7 @@ export function UsersPage({ range }: { range: Range }): React.JSX.Element {
               "Output",
               "Cache hit",
               "Org spend",
+              "At list rates",
             ]}
           >
             {rows.map((row) => (
@@ -90,6 +91,7 @@ export function UsersPage({ range }: { range: Range }): React.JSX.Element {
                     costTotal(row)
                   )}
                 </TableCell>
+                <TableCell className="num text-status-sub">{notionalTotal(row)}</TableCell>
               </TableRow>
             ))}
           </Table>

@@ -41,7 +41,17 @@
 
 import type { ServerResponse } from "node:http";
 import type { RouteTable } from "../routes/table.ts";
-import { resolveRoute } from "../routes/resolve.ts";
+// The menu is reached ONLY in the key posture — discovery requires a credential
+// that disables subscription auth — so the resolver that assumes no caller
+// credential is the one the request path will actually use. Using the plain
+// `resolveRoute` here would omit every model served by the `anthropic` default,
+// i.e. advertise less than the gateway can serve.
+import { resolveWithoutCallerCredential } from "../routes/resolve.ts";
+// Anthropic's own current models, offered as menu candidates when a route does
+// not already cover them. Shared with the `fest claude` preflight, which warns
+// about any of them this gateway cannot serve — one list, so the menu and the
+// warning cannot drift apart.
+import { BASE_MODELS } from "../../shared/base-models.ts";
 
 export interface ModelEntry {
   readonly type: "model";
@@ -52,17 +62,6 @@ export interface ModelEntry {
 
 /** Claude Code drops any id that does not look Anthropic-ish. */
 const CLIENT_VISIBLE = /(claude|anthropic)/i;
-
-/**
- * Anthropic's own current models, offered when a route does not already cover
- * them, so a gateway menu is a superset of the default experience rather than a
- * replacement that quietly loses Opus.
- */
-const BASE_MODELS: ReadonlyArray<{ id: string; name: string }> = [
-  { id: "claude-opus-5", name: "Opus 5" },
-  { id: "claude-sonnet-5", name: "Sonnet 5" },
-  { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5" },
-];
 
 /**
  * The menu must advertise only what this gateway can actually serve.
@@ -95,7 +94,7 @@ export function buildModelMenu(table: RouteTable): ModelEntry[] {
 
     // Resolve through the REAL router rather than re-implementing matching, so
     // the menu and the request path cannot disagree.
-    const decision = resolveRoute(table, id);
+    const decision = resolveWithoutCallerCredential(table, id);
 
     // Unservable in this posture — do not offer it.
     if (decision.pipeline !== "substitute" || decision.upstream === null) continue;

@@ -1,6 +1,6 @@
 /**
- * Overview: traffic, cache behaviour, latency, and the health of the metering
- * pipeline itself.
+ * Stats: traffic, cost, cache behaviour, latency, and the health of the
+ * metering pipeline itself.
  *
  * That last one is not padding. The sink drops the oldest record when its queue
  * is full, by design — the proxy degrades its metrics before it degrades a
@@ -16,9 +16,9 @@ import { Card, Muted, QueryState, Stat, StatRow } from "../components/ui.tsx";
 import { Alert, AlertDescription } from "../components/ui/alert.tsx";
 import { LatencyChart, Legend, TrafficChart } from "../components/charts.tsx";
 import { useStatusColors } from "../lib/colors.ts";
-import { contextTokens, costTotal, ms, num, ratio, tokens } from "../lib/format.ts";
+import { contextTokens, costTotal, ms, notionalTotal, num, ratio, tokens } from "../lib/format.ts";
 
-export function OverviewPage({ range }: { range: Range }): React.JSX.Element {
+export function StatsPage({ range }: { range: Range }): React.JSX.Element {
   const c = useStatusColors();
   // Same order and meaning as TrafficChart's stack, read from the same tokens:
   // a legend that disagrees with the chart it labels is worse than no legend.
@@ -82,7 +82,24 @@ export function OverviewPage({ range }: { range: Range }): React.JSX.Element {
               value={totals === undefined ? "—" : costTotal(totals)}
               note={`${num(totals?.subscriptionRequests ?? 0)} subscription requests excluded`}
             />
+            <Stat
+              label="Value at list rates"
+              value={totals === undefined ? "—" : notionalTotal(totals)}
+              tone="sub"
+              note="all usage, incl. subscription"
+            />
           </StatRow>
+          {totals !== undefined && totals.requests > 0 && (
+            <p className="mt-3">
+              <Muted>
+                <strong>{costTotal(totals)} billed</strong> to the org ·{" "}
+                <strong>{notionalTotal(totals)} of work</strong> at published API rates.
+                The gap is what developers' own subscriptions absorbed — real usage the org was
+                never invoiced for. The two are deliberately not added together: one is an
+                invoice, the other is what the work was worth.
+              </Muted>
+            </p>
+          )}
         </QueryState>
       </Card>
 

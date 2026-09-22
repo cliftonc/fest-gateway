@@ -4,7 +4,7 @@ The dashboard: Vite + React + TanStack Query + TanStack Charts, styled with
 Tailwind and shadcn/ui. The only part of this repository with an actual build
 step — the server has none.
 
-- `src/pages/` — one file per screen (Live, Routing, Overview, Users, Models,
+- `src/pages/` — one file per screen (Live, Routing, Stats, Users, Models,
   Errors, Admin, Login). Nav order is landing order: Live first, because "what
   is going through this thing right now" is the question someone opens a
   gateway dashboard with; Routing second, because "whose credential paid for

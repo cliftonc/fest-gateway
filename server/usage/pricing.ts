@@ -1,5 +1,5 @@
 /**
- * Lean per-model rate lookup.
+ * Per-model rate lookup and call pricing.
  *
  * Two rules carried over from the cost engine in fw-ai/fireconnect
  * (packages/setup-cli/lib/harnesses/claude/usage/pricing.mjs), both of which are
@@ -13,117 +13,111 @@
  *     looks plausible is worse than an honest "n/a", because nobody
  *     investigates a number that looks fine.
  *
- * Rates are USD per million tokens and WILL drift. They are deliberately a
- * small, legible table rather than a vendor API call: a gateway must not depend
- * on an external price service to serve a request.
+ * Rates come from the vendored litellm catalog in `prices/` — see that
+ * directory for why they are a snapshot with a background refresh rather than a
+ * live vendor call. This file replaced a hand-maintained 13-entry Claude table
+ * that had drifted 3x on Opus 5; the drift is the argument for not hand-
+ * maintaining rates.
+ *
+ * ── Two dollar figures, and why they are not interchangeable ─────────────────
+ *
+ * `cost` is ORG SPEND: what the organisation will be invoiced. It is null for a
+ * subscription request, because the developer's own plan absorbed it and there
+ * is no invoice.
+ *
+ * `notionalCost` is VALUE: what the same call would have cost at published API
+ * rates, computed on every path including subscription. It exists because the
+ * largest slice of Fest's traffic is otherwise invisible in money terms — a
+ * team lead cannot see what their Max seats are actually delivering.
+ *
+ * They are separate fields, separate columns and separate UI stats precisely so
+ * that "add them up" is never the path of least resistance. A notional figure
+ * summed into spend is a fabricated invoice.
  */
 
+import { contextTokens } from "../../shared/types.ts";
 import type { UsagePayload, CostBasis } from "../../shared/types.ts";
 import type { Cost } from "./cost.ts";
+import { lookupRate, tierFor } from "./prices/table.ts";
+import type { ModelRate } from "./prices/table.ts";
 
-export interface ModelRate {
-  readonly label: string;
-  readonly inputPerMillion: number;
-  readonly cacheReadPerMillion: number;
-  readonly cacheWrite5mPerMillion: number;
-  readonly cacheWrite1hPerMillion: number;
-  readonly outputPerMillion: number;
-}
-
-/**
- * Build a rate from the base input/output pair using Anthropic's standard cache
- * multipliers, so a new model is one line rather than five numbers to get wrong.
- */
-function rate(label: string, input: number, output: number): ModelRate {
-  return {
-    label,
-    inputPerMillion: input,
-    cacheReadPerMillion: input * 0.1,
-    cacheWrite5mPerMillion: input * 1.25,
-    cacheWrite1hPerMillion: input * 2.0,
-    outputPerMillion: output,
-  };
-}
-
-/**
- * Keyed by a normalised model family. Matching is prefix-based so dated
- * snapshots (`claude-opus-4-5-20260101`) resolve without a table entry each.
- */
-const RATES: ReadonlyArray<readonly [string, ModelRate]> = [
-  ["claude-opus-4-1", rate("Claude Opus 4.1", 15, 75)],
-  ["claude-opus-4", rate("Claude Opus 4", 15, 75)],
-  ["claude-opus-5", rate("Claude Opus 5", 15, 75)],
-  ["claude-opus", rate("Claude Opus", 15, 75)],
-  ["claude-sonnet-4-5", rate("Claude Sonnet 4.5", 3, 15)],
-  ["claude-sonnet-4", rate("Claude Sonnet 4", 3, 15)],
-  ["claude-sonnet-5", rate("Claude Sonnet 5", 3, 15)],
-  ["claude-sonnet", rate("Claude Sonnet", 3, 15)],
-  ["claude-3-7-sonnet", rate("Claude Sonnet 3.7", 3, 15)],
-  ["claude-haiku-4-5", rate("Claude Haiku 4.5", 1, 5)],
-  ["claude-haiku-4", rate("Claude Haiku 4", 1, 5)],
-  ["claude-haiku", rate("Claude Haiku", 1, 5)],
-  ["claude-3-5-haiku", rate("Claude Haiku 3.5", 0.8, 4)],
-];
-
-const WEB_SEARCH_PER_THOUSAND = 10;
-
-/** Strip Claude Code's client-side context-window tag before matching. */
-function normalise(model: string): string {
-  return model.trim().toLowerCase().replace(/\[1m\]$/, "");
-}
-
-export function lookupRate(model: string | null | undefined): ModelRate | null {
-  if (!model) return null;
-  const id = normalise(model);
-  // Longest prefix wins, so `claude-opus-4-1` beats `claude-opus`.
-  let best: ModelRate | null = null;
-  let bestLen = -1;
-  for (const [prefix, r] of RATES) {
-    if (id.startsWith(prefix) && prefix.length > bestLen) {
-      best = r;
-      bestLen = prefix.length;
-    }
-  }
-  return best;
-}
+export { lookupRate } from "./prices/table.ts";
+export type { ModelRate } from "./prices/table.ts";
 
 export interface PricedUsage {
+  /** Org spend. Null on the subscription path and for an unpriced model. */
   readonly cost: Cost;
   readonly basis: CostBasis;
+  /**
+   * List-rate value of this call, populated on EVERY path including
+   * subscription. Null only when the model has no published rate at all.
+   */
+  readonly notionalCost: Cost;
   readonly rateLabel: string | null;
+}
+
+/**
+ * Price one call at list rates.
+ *
+ * The tier is chosen from the call's own context size and service tier: a
+ * long-context request bills entirely at the higher tier, which is how both
+ * Anthropic and Google publish it, and is where Claude Code's 1M-context
+ * sessions were previously understated by half.
+ */
+function listPrice(rate: ModelRate, usage: UsagePayload): number {
+  const t = tierFor(rate, contextTokens(usage), usage.serviceTier);
+
+  const perMillion =
+    usage.inputTokens * t.inputPerMillion +
+    usage.cacheReadTokens * t.cacheReadPerMillion +
+    usage.cacheWrite5mTokens * t.cacheWrite5mPerMillion +
+    usage.cacheWrite1hTokens * t.cacheWrite1hPerMillion +
+    usage.outputTokens * t.outputPerMillion;
+
+  // A model with no published search rate contributes nothing for searches
+  // rather than borrowing another vendor's price.
+  const search = rate.webSearchPerThousand === null
+    ? 0
+    : (usage.webSearches * rate.webSearchPerThousand) / 1_000;
+
+  return perMillion / 1_000_000 + search;
 }
 
 /**
  * Price a call.
  *
- * `postureIsSubscription` short-circuits to `basis: "subscription"` with a null
- * cost: the developer's own plan absorbed it, so there is no org spend to
- * report. We deliberately do not compute a notional list price here — a number
- * in a cost column gets summed eventually, no matter how it is labelled.
+ * `postureIsSubscription` still yields `basis: "subscription"` with a null
+ * `cost` — that invariant is unchanged and load-bearing. What is new is that
+ * `notionalCost` is populated anyway, so the value of subscription work is
+ * recorded without ever entering a spend total.
+ *
+ * `provider` is litellm's provider key, needed on the substitute path where the
+ * served model is a provider-native id. See `ADAPTER_PRICE_PROVIDERS`.
  */
 export function priceUsage(
   model: string | null,
   usage: UsagePayload,
   postureIsSubscription: boolean,
+  provider?: string | undefined,
 ): PricedUsage {
-  if (postureIsSubscription) {
-    return { cost: null, basis: "subscription", rateLabel: null };
+  const rate = lookupRate(model, provider);
+  if (rate === null) {
+    // Unpriced, not free — and unpriced on both figures. We do not know what
+    // this model charges, so we do not know what it would have been worth.
+    return {
+      cost: null,
+      basis: postureIsSubscription ? "subscription" : "none",
+      notionalCost: null,
+      rateLabel: null,
+    };
   }
 
-  const r = lookupRate(model);
-  if (!r) return { cost: null, basis: "none", rateLabel: null };
+  const value = listPrice(rate, usage);
 
-  const perMillion =
-    usage.inputTokens * r.inputPerMillion +
-    usage.cacheReadTokens * r.cacheReadPerMillion +
-    usage.cacheWrite5mTokens * r.cacheWrite5mPerMillion +
-    usage.cacheWrite1hTokens * r.cacheWrite1hPerMillion +
-    usage.outputTokens * r.outputPerMillion;
-
-  const cost =
-    perMillion / 1_000_000 + (usage.webSearches * WEB_SEARCH_PER_THOUSAND) / 1_000;
-
-  return { cost, basis: "list", rateLabel: r.label };
+  if (postureIsSubscription) {
+    return { cost: null, basis: "subscription", notionalCost: value, rateLabel: rate.label };
+  }
+  return { cost: value, basis: "list", notionalCost: value, rateLabel: rate.label };
 }
 
 /**
@@ -133,8 +127,7 @@ export function priceUsage(
  * `cache_control`.
  */
 export function cacheHitRatio(usage: UsagePayload): number | null {
-  const context =
-    usage.inputTokens + usage.cacheReadTokens + usage.cacheWrite5mTokens + usage.cacheWrite1hTokens;
+  const context = contextTokens(usage);
   if (context <= 0) return null;
   return usage.cacheReadTokens / context;
 }

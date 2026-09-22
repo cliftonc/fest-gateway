@@ -30,6 +30,7 @@ function rec(id: string): UsageRecord {
     usage: EMPTY_USAGE,
     costUsd: null,
     costBasis: "subscription",
+    notionalCostUsd: null,
     ttfbMs: 100,
     durationMs: 200,
     bytesIn: 10,

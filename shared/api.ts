@@ -38,6 +38,18 @@ export interface UsageTotalsWire {
   readonly unpricedRequests: number;
   /** Real usage that produced no org spend. Counted, never priced. */
   readonly subscriptionRequests: number;
+  /**
+   * What ALL usage in this slice would have cost at published API rates,
+   * subscription included.
+   *
+   * VALUE, NOT SPEND, and the distinction is the reason it is a separate field
+   * rather than a wider `pricedCostUsd`. Never add the two: one is an invoice,
+   * the other is what the work was worth. A team running entirely on Max seats
+   * correctly shows `pricedCostUsd: 0` and a large figure here.
+   */
+  readonly notionalCostUsd: number;
+  /** Rows with no published rate, making `notionalCostUsd` a lower bound. */
+  readonly notionalUnpricedRequests: number;
   readonly cacheHitRatio: number | null;
 }
 
@@ -63,6 +75,12 @@ export interface RequestRowWire {
   /** Null means "no dollar figure applies or is available" — never `$0.00`. */
   readonly costUsd: number | null;
   readonly costBasis: CostBasis;
+  /**
+   * List-rate value of this one call, populated even when `costUsd` is null
+   * because a subscription absorbed it. Null means the model has no published
+   * rate — unknown, not free.
+   */
+  readonly notionalCostUsd: number | null;
   readonly ttfbMs: number | null;
   readonly durationMs: number;
   readonly rl5hUtilization: number | null;

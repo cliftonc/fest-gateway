@@ -169,6 +169,66 @@ test("the menu offers ONLY models this gateway can actually serve", () => {
   assert.ok(ids.includes("claude-haiku-4-5-20251001"), "claude-haiku-* routes to fireworks");
 });
 
+test("an anthropic upstream makes every base model servable, and says where they go", () => {
+  // The cliff this closes: with only substitute routes for a couple of ids, the
+  // menu omitted Opus and Haiku, the `fest claude` preflight warned about them,
+  // and selecting one 401'd. An org key at Anthropic serves all of them, so the
+  // menu may finally promise them.
+  const t = parseRouteTable(
+    JSON.stringify({
+      upstreams: {
+        anthropic: {
+          adapter: "anthropic",
+          baseUrl: "https://api.anthropic.com",
+          credential: "{env:ANTHROPIC_ORG_API_KEY}",
+        },
+      },
+      routes: [],
+    }),
+  );
+  const menu = buildModelMenu(t);
+  for (const base of ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]) {
+    const entry = menu.find((m) => m.id === base);
+    assert.ok(entry !== undefined, `${base} is servable on the org key and must be offered`);
+    assert.match(entry.display_name, /anthropic/);
+  }
+});
+
+test("every published entry is servable by the resolver the request path uses", async () => {
+  // The menu is reached ONLY in the key posture, so the resolver that assumes
+  // no caller credential is the one that must agree with it.
+  const { resolveWithoutCallerCredential } = await import("../server/routes/resolve.ts");
+  const t = parseRouteTable(
+    JSON.stringify({
+      upstreams: {
+        fireworks: {
+          adapter: "fireworks",
+          baseUrl: "https://api.fireworks.ai/inference",
+          credential: "{env:FIREWORKS_API_KEY}",
+        },
+        anthropic: {
+          adapter: "anthropic",
+          baseUrl: "https://api.anthropic.com",
+          credential: "{env:ANTHROPIC_ORG_API_KEY}",
+        },
+      },
+      routes: [
+        { id: "kimi", match: "claude-sonnet-*", upstream: "fireworks", model: "accounts/x/kimi", expose: "claude-kimi-k2-code" },
+      ],
+    }),
+  );
+  const menu = buildModelMenu(t);
+  assert.ok(menu.length > 0);
+  for (const entry of menu) {
+    const d = resolveWithoutCallerCredential(t, entry.id);
+    assert.equal(d.pipeline, "substitute", `${entry.id} would fail on selection`);
+    assert.notEqual(d.upstream, null);
+  }
+  // An explicit route still owns what it claims; the default takes the rest.
+  assert.match(menu.find((m) => m.id === "claude-sonnet-5")?.display_name ?? "", /fireworks/);
+  assert.match(menu.find((m) => m.id === "claude-opus-5")?.display_name ?? "", /anthropic/);
+});
+
 test("with no routing config there is no menu at all", () => {
   // The client treats a 404 / empty menu as "no gateway models" and falls back
   // to its built-in list, which is the correct outcome — better than offering

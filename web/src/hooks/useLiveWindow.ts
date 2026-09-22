@@ -30,6 +30,8 @@ export interface LiveEvent {
   readonly status: string;
   readonly pipeline: string;
   readonly costUsd: number | null;
+  /** List-rate value, populated on subscription rows too. Never spend. */
+  readonly notionalCostUsd: number | null;
   readonly subscription: boolean;
   readonly context: number;
   readonly cacheWrite: number;
@@ -67,6 +69,7 @@ export function toEvent(row: FeedRowWire): LiveEvent {
     status: row.status,
     pipeline: row.pipeline,
     costUsd: row.costUsd,
+    notionalCostUsd: row.notionalCostUsd,
     subscription: row.costBasis === "subscription",
     context: contextTokens(row.usage),
     cacheWrite: cacheWriteTokens(row.usage),

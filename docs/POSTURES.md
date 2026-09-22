@@ -35,10 +35,32 @@ because it is the only position a token lands in by accident.
 ## Key posture needs somewhere for requests to go
 
 With `ANTHROPIC_AUTH_TOKEN` set there is no caller credential to relay, so every
-request must be served by a route with a server-held credential. A model with no
-route gets an explicit 401 that says *this is a server configuration problem,
-not a problem with your token* — otherwise the developer spends the afternoon
+request must be served on a server-held credential. A model with nowhere to go
+gets an explicit 401 that says *this is a server configuration problem, not a
+problem with your token* — otherwise the developer spends the afternoon
 re-checking the one thing that is not wrong.
+
+**An `anthropic` upstream is the standing answer for the rest.** Define one in
+`routes.json` and every Anthropic model that no route claims is served there on
+the org's own key, id unchanged — a credential substitution, not a model one.
+Opus and Haiku stop being a cliff without one exact-match route per model id,
+which is config that has to be updated every time Anthropic ships a model and
+fails as a first-message 401 when someone forgets.
+
+Three limits, because this is the direction that spends money:
+
+- **It never applies in the subscription posture.** That path has a caller
+  credential; diverting it would bill the org for a turn the developer's own
+  plan had already covered. The fallback is reached only where the inbound
+  credential is absent — which is why it lives in `dispatch.ts` rather than
+  being expressible as a `claude-*` wildcard in the file. `resolveRoute` is
+  posture-blind, so such a wildcard would capture subscription traffic too.
+- **It never overrides a route**, including an `upstream: null` carve-out.
+- **It never routes a non-Anthropic id**, so `gpt-oss-120b` still fails with
+  Fest's message rather than a 404 from a vendor who never had that model.
+
+Records from this path carry `pipeline: "substitute"` with `routeId: null`:
+substituted, but not by a route anyone wrote.
 
 ## `GET /v1/models`
 
@@ -56,6 +78,13 @@ ANTHROPIC_AUTH_TOKEN=<your-fest-token> \
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 \
 claude
 ```
+
+**`fest claude gw` is the supported way to get here.** It sets (2) and (4) from
+your `~/.fest` login, refuses to spawn if the gateway has nothing servable, and
+warns about any base model you could select that has no route — see
+`docs/CLI-AUTH.md`. You still export (1) yourself, since it governs the client
+rather than the gateway. `fest claude` with no `gw` picks this posture on its
+own if you have no Anthropic subscription login.
 
 Without (1) the client never calls the endpoint at all — confirmed empirically
 (zero requests) and in the binary (`[Bootstrap] Skipped gateway /v1/models

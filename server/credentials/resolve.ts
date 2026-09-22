@@ -95,13 +95,20 @@ export function resolveCredential(
       result: "missing",
       reason: "environment variable is unset or empty",
     });
+    const model = JSON.stringify(decision.requestedModel ?? "?");
+    // No route means no route to name: this is the key-posture default for
+    // Anthropic models, not an entry in the file. Naming a route id of "?"
+    // sends the operator looking through routes.json for something that was
+    // never there.
+    const sends =
+      decision.route === null
+        ? `Fest: ${model} defaults to upstream ${JSON.stringify(upstream.id)}`
+        : `Fest: route ${JSON.stringify(decision.route.id)} sends ${model} to upstream ${JSON.stringify(upstream.id)}`;
     return {
       ok: false,
       considered,
       message:
-        `Fest: route ${JSON.stringify(decision.route?.id ?? "?")} sends ` +
-        `${JSON.stringify(decision.requestedModel ?? "?")} to upstream ${JSON.stringify(upstream.id)}, ` +
-        `whose credential ${upstream.credential.source} is not set on the Fest server. ` +
+        `${sends}, whose credential ${upstream.credential.source} is not set on the Fest server. ` +
         `This request was refused rather than served on a different credential.`,
     };
   }

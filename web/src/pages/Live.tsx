@@ -32,7 +32,7 @@ import { LiveStats } from "../components/live/LiveStats.tsx";
 import { RollupBoard, type RollupEntry } from "../components/live/RollupBoard.tsx";
 import { DeveloperAvatar } from "../components/live/DeveloperAvatar.tsx";
 import { Badge } from "../components/ui/badge.tsx";
-import { costTotal, modelLabel, originLabel, personLabel } from "../lib/format.ts";
+import { costTotal, modelLabel, notionalTotal, originLabel, personLabel } from "../lib/format.ts";
 
 const DEFAULT_WINDOW_MS = 300_000;
 
@@ -201,6 +201,10 @@ export function LivePage(): React.JSX.Element {
     const priced = events.filter((e) => !e.subscription && e.costUsd !== null);
     const unpriced = events.filter((e) => !e.subscription && e.costUsd === null).length;
 
+    // Value runs on its own books: subscription rows are EXCLUDED above and
+    // INCLUDED here, which is the whole reason both numbers are shown.
+    const valued = events.filter((e) => e.notionalCostUsd !== null);
+
     return {
       perMinute: win.total / minutes,
       tokensPerMinute: tokenSum / minutes,
@@ -211,6 +215,10 @@ export function LivePage(): React.JSX.Element {
       spend: costTotal({
         pricedCostUsd: priced.reduce((a, e) => a + (e.costUsd ?? 0), 0),
         unpricedRequests: unpriced,
+      }),
+      value: notionalTotal({
+        notionalCostUsd: valued.reduce((a, e) => a + (e.notionalCostUsd ?? 0), 0),
+        notionalUnpricedRequests: events.length - valued.length,
       }),
       subscriptionRequests: subscription,
     };
@@ -282,13 +290,35 @@ export function LivePage(): React.JSX.Element {
       </div>
 
       <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
-        <div className="mb-2 flex items-baseline justify-between gap-3">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
           <h2 className="text-[11.5px] tracking-wide text-muted-foreground uppercase">
             Who paid, in this window
           </h2>
           <span className="text-[11px] text-muted-foreground">
-            org spend {stats.spend} · {stats.subscriptionRequests} absorbed by subscriptions
+            {stats.subscriptionRequests} absorbed by subscriptions
           </span>
+        </div>
+
+        {/*
+          Both figures, adjacent and labelled, never summed. Billed is what the
+          org owes; value is what the same window of work is worth at published
+          API rates, subscription included. On a team running Max seats the
+          first is near zero and the second is not — which is the number that
+          makes the case for the gateway.
+        */}
+        <div className="mb-3 flex flex-wrap items-end gap-x-8 gap-y-2">
+          <div>
+            <div className="text-[11px] tracking-wide text-muted-foreground uppercase">Billed</div>
+            <div className="num mt-0.5 text-xl font-semibold">{stats.spend}</div>
+            <div className="text-[11px] text-muted-foreground">org spend</div>
+          </div>
+          <div>
+            <div className="text-[11px] tracking-wide text-muted-foreground uppercase">
+              Value at list rates
+            </div>
+            <div className="num mt-0.5 text-xl font-semibold text-status-sub">{stats.value}</div>
+            <div className="text-[11px] text-muted-foreground">all usage, incl. subscription</div>
+          </div>
         </div>
 
         {byOrigin.length === 0 ? (

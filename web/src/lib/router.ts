@@ -19,13 +19,13 @@ import { useSyncExternalStore } from "react";
  * because "whose credential paid for that" is the compliance question the
  * gateway exists to answer, and it should not need looking for.
  */
-export const PAGES = ["live", "routing", "overview", "users", "models", "errors", "admin"] as const;
+export const PAGES = ["live", "routing", "stats", "users", "models", "errors", "admin"] as const;
 export type PageId = (typeof PAGES)[number];
 
 export const PAGE_TITLES: Readonly<Record<PageId, string>> = {
   live: "Live feed",
   routing: "Routing",
-  overview: "Overview",
+  stats: "Stats",
   users: "Users",
   models: "Models",
   errors: "Errors",
