@@ -10,6 +10,10 @@
 
 import { useState } from "react";
 import { login } from "../lib/auth.ts";
+import { Brand } from "../App.tsx";
+import { Button } from "../components/ui/button.tsx";
+import { Input } from "../components/ui/input.tsx";
+import { Label } from "../components/ui/label.tsx";
 
 const PROVIDER_LABEL: Record<string, string> = { google: "Google", github: "GitHub" };
 
@@ -46,21 +50,20 @@ export function LoginPage({
   }
 
   return (
-    <div className="login">
-      <div className="login-card">
-        <div className="brand">
-          Fest
-          <small>self-hosted Claude Code gateway</small>
+    <div className="grid min-h-screen place-items-center p-6">
+      <div className="w-full max-w-[380px] rounded-xl bg-card p-6 ring-1 ring-foreground/10">
+        <div className="-mx-2.5">
+          <Brand />
         </div>
 
         {authError !== null && (
-          <p className="state bad" role="alert">
+          <p className="mt-4 text-sm text-status-bad" role="alert">
             {authError}
           </p>
         )}
 
         {setupRequired && (
-          <p className="sub">
+          <p className="mt-4 text-[13px] text-muted-foreground">
             Nobody has claimed this deployment yet, so it is running open on loopback.
             {oauthProviders.length > 0
               ? " Sign in below to become its owner, or create an account from the host:"
@@ -69,28 +72,38 @@ export function LoginPage({
         )}
 
         {oauthProviders.length > 0 && (
-          <div className="login-oauth">
+          <div className="mt-4 flex flex-col gap-2">
             {oauthProviders.map((p) => (
-              <a key={p} className="login-oauth-button" href={`/api/auth/oauth/${p}/start`}>
-                Continue with {PROVIDER_LABEL[p] ?? p}
-              </a>
+              // Real anchors: these are full-page navigations to the OAuth
+              // start endpoint, not in-app actions.
+              <Button key={p} variant="outline" asChild>
+                <a href={`/api/auth/oauth/${p}/start`}>Continue with {PROVIDER_LABEL[p] ?? p}</a>
+              </Button>
             ))}
-            {!setupRequired && <p className="sub">or sign in with a password</p>}
+            {!setupRequired && (
+              <p className="mt-1 text-center text-[13px] text-muted-foreground">
+                or sign in with a password
+              </p>
+            )}
           </div>
         )}
 
         {setupRequired ? (
           <>
-            <pre className="login-cmd">fest admin create you@corp.test</pre>
-            <p className="sub">
+            <pre className="mt-4 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
+              fest admin create you@corp.test
+            </pre>
+            <p className="mt-2 text-[13px] text-muted-foreground">
               The password is printed once. Until then Fest will refuse to listen on any interface
               other than loopback.
             </p>
           </>
         ) : (
-          <form onSubmit={(e) => void submit(e)}>
-            <label htmlFor="email">Email</label>
-            <input
+          <form onSubmit={(e) => void submit(e)} className="mt-4 flex flex-col gap-2">
+            <Label htmlFor="email" className="text-muted-foreground">
+              Email
+            </Label>
+            <Input
               id="email"
               type="email"
               autoComplete="username"
@@ -99,8 +112,10 @@ export function LoginPage({
               required
             />
 
-            <label htmlFor="password">Password</label>
-            <input
+            <Label htmlFor="password" className="mt-2 text-muted-foreground">
+              Password
+            </Label>
+            <Input
               id="password"
               type="password"
               autoComplete="current-password"
@@ -111,17 +126,21 @@ export function LoginPage({
 
             {/* The server's message, unaltered: it says the same thing for a
                 wrong password and an unknown account, which is the point. */}
-            {error !== null && <p className="state bad" role="alert">{error}</p>}
+            {error !== null && (
+              <p className="text-sm text-status-bad" role="alert">
+                {error}
+              </p>
+            )}
 
-            <button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy} className="mt-4">
               {busy ? "Signing in…" : "Sign in"}
-            </button>
+            </Button>
           </form>
         )}
 
-        <p className="login-foot">
-          Accounts are created from the host with <code>fest admin create</code>. There is no
-          self-registration and no email reset.
+        <p className="mt-5 text-[11.5px] leading-relaxed text-muted-foreground">
+          Accounts are created from the host with <code className="mono">fest admin create</code>.
+          There is no self-registration and no email reset.
         </p>
       </div>
     </div>

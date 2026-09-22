@@ -13,17 +13,22 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Range } from "../lib/api.ts";
 import { isExactRange } from "../lib/range.ts";
 import { Card, Muted, QueryState, Stat, StatRow } from "../components/ui.tsx";
+import { Alert, AlertDescription } from "../components/ui/alert.tsx";
 import { LatencyChart, Legend, TrafficChart } from "../components/charts.tsx";
+import { useStatusColors } from "../lib/colors.ts";
 import { contextTokens, costTotal, ms, num, ratio, tokens } from "../lib/format.ts";
 
-const BUCKET_LEGEND = [
-  { label: "Input", color: "#58a6ff" },
-  { label: "Cache read", color: "#3fb950" },
-  { label: "Cache write 5m", color: "#a371f7" },
-  { label: "Cache write 1h", color: "#d29922" },
-];
-
 export function OverviewPage({ range }: { range: Range }): React.JSX.Element {
+  const c = useStatusColors();
+  // Same order and meaning as TrafficChart's stack, read from the same tokens:
+  // a legend that disagrees with the chart it labels is worse than no legend.
+  const bucketLegend = [
+    { label: "Input", color: c.info },
+    { label: "Cache read", color: c.ok },
+    { label: "Cache write 5m", color: c.sub },
+    { label: "Cache write 1h", color: c.warn },
+  ];
+
   const overview = useQuery({
     queryKey: ["overview", range.fromMs, range.toMs],
     queryFn: () => api.overview(range),
@@ -37,12 +42,14 @@ export function OverviewPage({ range }: { range: Range }): React.JSX.Element {
   return (
     <>
       {sink !== undefined && sink.dropped > 0 && (
-        <div className="banner bad">
-          The metering queue dropped {num(sink.dropped)} record
-          {sink.dropped === 1 ? "" : "s"} under load. Every number on this dashboard is therefore a
-          lower bound. Requests themselves were unaffected — the proxy sheds metrics before it sheds
-          traffic.
-        </div>
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>
+            The metering queue dropped {num(sink.dropped)} record
+            {sink.dropped === 1 ? "" : "s"} under load. Every number on this dashboard is therefore
+            a lower bound. Requests themselves were unaffected — the proxy sheds metrics before it
+            sheds traffic.
+          </AlertDescription>
+        </Alert>
       )}
 
       <Card title="This range">
@@ -87,13 +94,13 @@ export function OverviewPage({ range }: { range: Range }): React.JSX.Element {
           {d !== undefined && (
             <>
               <TrafficChart series={d.series} fromMs={range.fromMs} toMs={range.toMs} />
-              <Legend items={BUCKET_LEGEND} />
+              <Legend items={bucketLegend} />
             </>
           )}
         </QueryState>
       </Card>
 
-      <div className="grid-2">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] gap-4">
         <Card
           title="Latency"
           subtitle={

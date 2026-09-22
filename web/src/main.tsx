@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App.tsx";
+import { ThemeProvider } from "./lib/theme.tsx";
+import { TooltipProvider } from "./components/ui/tooltip.tsx";
 import "./styles.css";
 
 /**
@@ -30,8 +32,15 @@ if (root === null) throw new Error("fest: #root is missing from index.html");
 
 createRoot(root).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        {/* Tooltips carry the credential trail, which is the one thing on the
+            feed a reader genuinely has to be able to reach. A short delay keeps
+            them from firing while the pointer crosses a dense row. */}
+        <TooltipProvider delayDuration={200}>
+          <App />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

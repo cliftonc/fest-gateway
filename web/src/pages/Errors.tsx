@@ -19,7 +19,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Range } from "../lib/api.ts";
 import { isExactRange } from "../lib/range.ts";
-import { Card, Muted, Pill, QueryState, Stat, StatRow, Table } from "../components/ui.tsx";
+import {
+  Card,
+  Muted,
+  Pill,
+  QueryState,
+  Stat,
+  StatRow,
+  Table,
+  TableCell,
+  TableRow,
+} from "../components/ui.tsx";
 import { LatencyChart } from "../components/charts.tsx";
 import { ms, num } from "../lib/format.ts";
 
@@ -37,7 +47,7 @@ function explain(errorType: string | null, httpStatus: number | null): string {
   if (httpStatus === 401) {
     return "Expected: the client refreshes its own token and retries. Fest forwards 401s untouched so that works.";
   }
-  if (httpStatus === 429) return "Rate limited. Check the quota panel on Credential posture.";
+  if (httpStatus === 429) return "Rate limited. Check the quota panel on Routing.";
   if (httpStatus !== null && httpStatus >= 500) return "Upstream server error.";
   return "";
 }
@@ -71,8 +81,8 @@ export function ErrorsPage({ range }: { range: Range }): React.JSX.Element {
 
           <Table head={["Cause", "HTTP", "Count", "What it means"]}>
             {rows.map((row) => (
-              <tr key={`${row.errorType ?? "none"}:${row.httpStatus ?? "none"}`}>
-                <td>
+              <TableRow key={`${row.errorType ?? "none"}:${row.httpStatus ?? "none"}`}>
+                <TableCell>
                   {row.errorType === null ? (
                     <Muted>no error type</Muted>
                   ) : (
@@ -80,13 +90,13 @@ export function ErrorsPage({ range }: { range: Range }): React.JSX.Element {
                       {row.errorType}
                     </Pill>
                   )}
-                </td>
-                <td className="num">{row.httpStatus ?? <Muted>—</Muted>}</td>
-                <td className="num">{num(row.count)}</td>
-                <td>
+                </TableCell>
+                <TableCell className="num">{row.httpStatus ?? <Muted>—</Muted>}</TableCell>
+                <TableCell className="num">{num(row.count)}</TableCell>
+                <TableCell>
                   <Muted>{explain(row.errorType, row.httpStatus)}</Muted>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
           </Table>
         </QueryState>

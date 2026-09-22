@@ -18,7 +18,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api.ts";
-import { Card, Muted, Pill, QueryState, Table } from "./ui.tsx";
+import { Card, Muted, Pill, QueryState, Table, TableCell, TableRow } from "./ui.tsx";
+import { Alert, AlertDescription } from "./ui/alert.tsx";
 
 export function RoutingCard(): React.JSX.Element {
   const routing = useQuery({
@@ -51,45 +52,48 @@ export function RoutingCard(): React.JSX.Element {
         emptyText="No routing configured. Every request passes through to Anthropic on the caller's own credential — the safe default. Set FEST_ROUTES to change that."
       >
         {broken.length > 0 && (
-          <div className="banner bad">
-            {broken.map((u) => u.credentialSource).join(", ")}{" "}
-            {broken.length === 1 ? "is" : "are"} not set on the Fest server. Every request matching
-            a route that targets{" "}
-            {broken.length === 1 ? "this upstream" : "these upstreams"} will be <strong>refused</strong> —
-            Fest will not quietly serve it on a developer's subscription instead.
-          </div>
+          <Alert variant="destructive" className="mb-4">
+            <AlertDescription>
+              {broken.map((u) => u.credentialSource).join(", ")}{" "}
+              {broken.length === 1 ? "is" : "are"} not set on the Fest server. Every request
+              matching a route that targets{" "}
+              {broken.length === 1 ? "this upstream" : "these upstreams"} will be{" "}
+              <strong>refused</strong> — Fest will not quietly serve it on a developer's
+              subscription instead.
+            </AlertDescription>
+          </Alert>
         )}
 
         <Table head={["Upstream", "Adapter", "Endpoint", "Credential", "Transforms"]}>
           {(data?.upstreams ?? []).map((u) => (
-            <tr key={u.id}>
-              <td>{u.id}</td>
-              <td>{u.adapter}</td>
-              <td className="mono">{u.baseUrl}</td>
-              <td>
+            <TableRow key={u.id}>
+              <TableCell>{u.id}</TableCell>
+              <TableCell>{u.adapter}</TableCell>
+              <TableCell className="mono">{u.baseUrl}</TableCell>
+              <TableCell>
                 <span className="mono">{u.credentialSource}</span>{" "}
                 <Pill tone={u.credentialPresent ? "ok" : "bad"}>
                   {u.credentialPresent ? "set" : "not set"}
                 </Pill>
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <Muted>{u.transforms.join("; ")}</Muted>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
         </Table>
 
-        <p className="sub" style={{ marginTop: 16, marginBottom: 6 }}>
+        <p className="mt-4 mb-1.5 text-xs text-muted-foreground">
           Rules in <strong>evaluation order</strong> — exact matches first, then longest wildcard,
           then file order. This is not the order they appear in the file.
         </p>
 
         <Table head={["Route", "Matches", "Goes to", "Sent as"]}>
           {(data?.routes ?? []).map((r) => (
-            <tr key={r.id}>
-              <td>{r.id}</td>
-              <td className="mono">{r.match}</td>
-              <td>
+            <TableRow key={r.id}>
+              <TableCell>{r.id}</TableCell>
+              <TableCell className="mono">{r.match}</TableCell>
+              <TableCell>
                 {r.upstream === null ? (
                   <Pill tone="ok" title="Deliberately kept on the caller's own credential.">
                     pass through
@@ -99,11 +103,11 @@ export function RoutingCard(): React.JSX.Element {
                     {r.upstream}
                   </Pill>
                 )}
-              </td>
-              <td className="mono">
+              </TableCell>
+              <TableCell className="mono">
                 {r.model === null ? <Muted>unchanged</Muted> : r.model}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
         </Table>
       </QueryState>

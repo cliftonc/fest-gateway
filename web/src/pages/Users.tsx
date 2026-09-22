@@ -11,8 +11,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api, type Range } from "../lib/api.ts";
-import { Card, Muted, Pill, QueryState, Table } from "../components/ui.tsx";
-import { contextTokens, costTotal, num, ratio, tokens } from "../lib/format.ts";
+import { Card, Muted, Pill, QueryState, Table, TableCell, TableRow } from "../components/ui.tsx";
+import { Alert, AlertDescription } from "../components/ui/alert.tsx";
+import { contextTokens, costTotal, num, personLabel, ratio, tokens } from "../lib/format.ts";
 
 export function UsersPage({ range }: { range: Range }): React.JSX.Element {
   const users = useQuery({
@@ -26,12 +27,14 @@ export function UsersPage({ range }: { range: Range }): React.JSX.Element {
   return (
     <>
       {unattributed !== undefined && unattributed.requests > 0 && (
-        <div className="banner">
-          {num(unattributed.requests)} request{unattributed.requests === 1 ? "" : "s"} arrived with
-          no Fest identity token and could not be attributed to anyone. Issue a token with{" "}
-          <code>fest token create &lt;email&gt;</code> and set{" "}
-          <code>FEST_REQUIRE_IDENTITY=true</code> once every developer has one.
-        </div>
+        <Alert variant="warning" className="mb-4">
+          <AlertDescription>
+            {num(unattributed.requests)} request{unattributed.requests === 1 ? "" : "s"} arrived
+            with no Fest identity token and could not be attributed to anyone. Issue a token with{" "}
+            <code className="mono">fest token create &lt;email&gt;</code> and set{" "}
+            <code className="mono">FEST_REQUIRE_IDENTITY=true</code> once every developer has one.
+          </AlertDescription>
+        </Alert>
       )}
 
       <Card
@@ -56,36 +59,38 @@ export function UsersPage({ range }: { range: Range }): React.JSX.Element {
             ]}
           >
             {rows.map((row) => (
-              <tr key={row.userId === "" ? "unattributed" : row.userId}>
-                <td>
+              <TableRow key={row.userId === "" ? "unattributed" : row.userId}>
+                <TableCell>
                   {row.userId === "" ? (
                     <Pill tone="warn" title="No identity token was presented on these requests.">
                       unattributed
                     </Pill>
                   ) : (
-                    (row.email ?? row.userId)
+                    personLabel(row.userId, row.email)
                   )}
-                </td>
-                <td className="num">{num(row.requests)}</td>
-                <td className="num">
+                </TableCell>
+                <TableCell className="num">{num(row.requests)}</TableCell>
+                <TableCell className="num">
                   {row.subscriptionRequests === row.requests ? (
-                    <span className="tone-ok">all</span>
+                    <span className="text-status-ok">all</span>
                   ) : (
                     num(row.subscriptionRequests)
                   )}
-                </td>
-                <td className="num">{row.errors === 0 ? <Muted>0</Muted> : <span className="tone-bad">{row.errors}</span>}</td>
-                <td className="num">{tokens(contextTokens(row.usage))}</td>
-                <td className="num">{tokens(row.usage.outputTokens)}</td>
-                <td className="num">{ratio(row.cacheHitRatio)}</td>
-                <td className="num">
+                </TableCell>
+                <TableCell className="num">
+                  {row.errors === 0 ? <Muted>0</Muted> : <span className="text-status-bad">{row.errors}</span>}
+                </TableCell>
+                <TableCell className="num">{tokens(contextTokens(row.usage))}</TableCell>
+                <TableCell className="num">{tokens(row.usage.outputTokens)}</TableCell>
+                <TableCell className="num">{ratio(row.cacheHitRatio)}</TableCell>
+                <TableCell className="num">
                   {row.subscriptionRequests === row.requests ? (
                     <Muted>none</Muted>
                   ) : (
                     costTotal(row)
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
           </Table>
         </QueryState>

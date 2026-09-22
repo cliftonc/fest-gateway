@@ -12,12 +12,19 @@
 
 import { useSyncExternalStore } from "react";
 
-export const PAGES = ["posture", "live", "overview", "users", "models", "errors", "admin"] as const;
+/**
+ * Nav order is landing order. The live feed is first because it answers "is
+ * this thing working, and what is going through it right now" without the
+ * reader having to pick a question first; routing is immediately behind it
+ * because "whose credential paid for that" is the compliance question the
+ * gateway exists to answer, and it should not need looking for.
+ */
+export const PAGES = ["live", "routing", "overview", "users", "models", "errors", "admin"] as const;
 export type PageId = (typeof PAGES)[number];
 
 export const PAGE_TITLES: Readonly<Record<PageId, string>> = {
-  posture: "Credential posture",
   live: "Live feed",
+  routing: "Routing",
   overview: "Overview",
   users: "Users",
   models: "Models",
@@ -36,7 +43,7 @@ function subscribe(cb: () => void): () => void {
 
 export function usePage(): PageId {
   const hash = useSyncExternalStore(subscribe, currentHash, () => "");
-  return (PAGES as readonly string[]).includes(hash) ? (hash as PageId) : "posture";
+  return (PAGES as readonly string[]).includes(hash) ? (hash as PageId) : "live";
 }
 
 export const hrefFor = (page: PageId): string => `#/${page}`;

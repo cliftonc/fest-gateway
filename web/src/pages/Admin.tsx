@@ -8,23 +8,18 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { Card } from "../components/ui.tsx";
+import { Card, Muted, QueryState, Table, TableCell, TableRow, TONE_TEXT } from "../components/ui.tsx";
 import { api } from "../lib/api.ts";
 import { when } from "../lib/format.ts";
 
-const OUTCOME_TONE: Record<string, string> = { ok: "tone-ok", denied: "tone-bad", error: "tone-warn" };
+const OUTCOME_TONE: Readonly<Record<string, "ok" | "bad" | "warn">> = {
+  ok: "ok",
+  denied: "bad",
+  error: "warn",
+};
 
 export function AdminPage(): React.JSX.Element {
   const q = useQuery({ queryKey: ["audit"], queryFn: () => api.audit() });
-
-  if (q.isPending) return <div className="state">Loading…</div>;
-  if (q.isError) {
-    return (
-      <Card title="Audit log">
-        <p className="state bad">{q.error instanceof Error ? q.error.message : "failed"}</p>
-      </Card>
-    );
-  }
 
   return (
     <Card
@@ -37,43 +32,33 @@ export function AdminPage(): React.JSX.Element {
         </>
       }
     >
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Actor</th>
-              <th>Action</th>
-              <th>Target</th>
-              <th>Outcome</th>
-              <th>Detail</th>
-              <th>From</th>
-            </tr>
-          </thead>
-          <tbody>
-            {q.data.rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="muted">
-                  Nothing recorded yet.
-                </td>
-              </tr>
-            )}
-            {q.data.rows.map((r) => (
-              <tr key={r.seq}>
-                <td>{when(r.at)}</td>
-                <td>{r.actorLabel === "" ? <span className="muted">—</span> : r.actorLabel}</td>
-                <td>{r.action}</td>
-                <td className="muted">{r.target === "" ? "—" : r.target}</td>
-                <td className={OUTCOME_TONE[r.outcome] ?? ""}>{r.outcome}</td>
-                <td className="muted">
-                  {Object.keys(r.detail).length === 0 ? "—" : JSON.stringify(r.detail)}
-                </td>
-                <td className="muted">{r.ip === "" ? "—" : r.ip}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <QueryState
+        isPending={q.isPending}
+        error={q.error}
+        isEmpty={q.data !== undefined && q.data.rows.length === 0}
+        emptyText="Nothing recorded yet."
+      >
+        <Table head={["When", "Actor", "Action", "Target", "Outcome", "Detail", "From"]}>
+          {(q.data?.rows ?? []).map((r) => {
+            const tone = OUTCOME_TONE[r.outcome];
+            return (
+            <TableRow key={r.seq}>
+              <TableCell>{when(r.at)}</TableCell>
+              <TableCell>{r.actorLabel === "" ? <Muted>—</Muted> : r.actorLabel}</TableCell>
+              <TableCell>{r.action}</TableCell>
+              <TableCell><Muted>{r.target === "" ? "—" : r.target}</Muted></TableCell>
+              <TableCell className={tone === undefined ? "" : TONE_TEXT[tone]}>
+                {r.outcome}
+              </TableCell>
+              <TableCell>
+                <Muted>{Object.keys(r.detail).length === 0 ? "—" : JSON.stringify(r.detail)}</Muted>
+              </TableCell>
+              <TableCell><Muted>{r.ip === "" ? "—" : r.ip}</Muted></TableCell>
+            </TableRow>
+            );
+          })}
+        </Table>
+      </QueryState>
     </Card>
   );
 }

@@ -12,7 +12,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api, type Range } from "../lib/api.ts";
-import { Card, Muted, QueryState, Table } from "../components/ui.tsx";
+import { Card, Muted, QueryState, Table, TableCell, TableRow } from "../components/ui.tsx";
 import { costTotal, modelLabel, num, ratio, tokens } from "../lib/format.ts";
 
 export function ModelsPage({ range }: { range: Range }): React.JSX.Element {
@@ -43,21 +43,21 @@ export function ModelsPage({ range }: { range: Range }): React.JSX.Element {
           ]}
         >
           {rows.map((row) => (
-            <tr key={row.servedModel === "" ? "unresolved" : row.servedModel}>
-              <td className="mono">
+            <TableRow key={row.servedModel === "" ? "unresolved" : row.servedModel}>
+              <TableCell className="mono" title={row.servedModel}>
                 {row.servedModel === "" ? <Muted>unresolved</Muted> : modelLabel(row.servedModel)}
-              </td>
-              <td className="num">{num(row.requests)}</td>
-              <td className="num">{tokens(row.usage.inputTokens)}</td>
-              <td className="num">{tokens(row.usage.cacheReadTokens)}</td>
-              <td className="num">{tokens(row.usage.cacheWrite5mTokens)}</td>
-              <td className="num">{tokens(row.usage.cacheWrite1hTokens)}</td>
-              <td className="num">{tokens(row.usage.outputTokens)}</td>
-              <td className="num">{ratio(row.cacheHitRatio)}</td>
-              <td className="num">
+              </TableCell>
+              <TableCell className="num">{num(row.requests)}</TableCell>
+              <TableCell className="num">{tokens(row.usage.inputTokens)}</TableCell>
+              <TableCell className="num">{tokens(row.usage.cacheReadTokens)}</TableCell>
+              <TableCell className="num">{tokens(row.usage.cacheWrite5mTokens)}</TableCell>
+              <TableCell className="num">{tokens(row.usage.cacheWrite1hTokens)}</TableCell>
+              <TableCell className="num">{tokens(row.usage.outputTokens)}</TableCell>
+              <TableCell className="num">{ratio(row.cacheHitRatio)}</TableCell>
+              <TableCell className="num">
                 {row.subscriptionRequests === row.requests ? <Muted>none</Muted> : costTotal(row)}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
         </Table>
       </QueryState>

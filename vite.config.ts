@@ -5,8 +5,10 @@
  *
  * `base: "./"` so the bundle does not care what path it is mounted at.
  */
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 const API_TARGET = process.env.FEST_DEV_API ?? "http://127.0.0.1:8787";
 
@@ -14,7 +16,12 @@ export default defineConfig({
   root: "web",
   base: "./",
   build: { outDir: "dist", emptyOutDir: true, sourcemap: true },
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  // Mirrors `paths` in web/tsconfig.json. Vite does not read tsconfig paths on
+  // its own, and shadcn's generated components import through `@/`.
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./web/src", import.meta.url)) },
+  },
   server: {
     port: 5173,
     proxy: {

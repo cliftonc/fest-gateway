@@ -21,13 +21,8 @@ import { Chart } from "@tanstack/charts/react";
 import type { OverviewResponse } from "../../../shared/api.ts";
 import { fillSeries } from "../../../shared/series.ts";
 import { ORIGIN_LABELS, tokens } from "../lib/format.ts";
+import { useStatusColors } from "../lib/colors.ts";
 
-/**
- * Fixed hex rather than CSS custom properties: these values are also used for
- * the HTML legend swatches, and a chart whose colours resolve differently from
- * its legend is worse than one with no legend at all.
- */
-const BUCKET_COLORS = ["#58a6ff", "#3fb950", "#a371f7", "#d29922"] as const;
 const BUCKET_ORDER = ["Input", "Cache read", "Cache write 5m", "Cache write 1h"] as const;
 
 export const ORIGIN_ORDER = [
@@ -38,16 +33,34 @@ export const ORIGIN_ORDER = [
 ] as const;
 
 /**
+ * Chart colours come from the same `--status-*` tokens as every badge and
+ * meter, resolved at definition time because TanStack Charts paints values into
+ * SVG and never sees a class. The legend swatches read from these same hooks,
+ * so a chart cannot resolve differently from the legend explaining it — which
+ * is worse than having no legend at all.
+ */
+function useBucketColors(): readonly string[] {
+  const c = useStatusColors();
+  return useMemo(() => [c.info, c.ok, c.sub, c.warn], [c]);
+}
+
+/**
  * Subscription is green and a server-held key is amber — not decoration.
  * `fallback_server` means the org paid instead of the developer's own plan, and
  * on this dashboard that is the event worth noticing.
  */
-export const ORIGIN_COLORS: Readonly<Record<string, string>> = {
-  inbound_subscription: "#3fb950",
-  inbound_key: "#58a6ff",
-  fallback_server: "#d29922",
-  none: "#8b949e",
-};
+export function useOriginColors(): Readonly<Record<string, string>> {
+  const c = useStatusColors();
+  return useMemo(
+    () => ({
+      inbound_subscription: c.ok,
+      inbound_key: c.info,
+      fallback_server: c.warn,
+      none: c.muted,
+    }),
+    [c],
+  );
+}
 
 export function Legend({
   items,
@@ -55,10 +68,13 @@ export function Legend({
   items: ReadonlyArray<{ label: string; color: string }>;
 }): React.JSX.Element {
   return (
-    <div className="legend">
+    <div className="mt-2 flex flex-wrap gap-3.5 text-xs text-muted-foreground">
       {items.map((i) => (
         <span key={i.label}>
-          <span className="swatch" style={{ background: i.color }} />
+          <span
+            className="mr-1.5 inline-block size-2.5 rounded-sm align-middle"
+            style={{ background: i.color }}
+          />
           {i.label}
         </span>
       ))}
@@ -117,6 +133,7 @@ export function TrafficChart({
     [series, fromMs, toMs],
   );
   const multiDay = toMs - fromMs > 24 * 3_600_000;
+  const bucketColors = useBucketColors();
 
   const definition = useMemo(
     () =>
@@ -150,16 +167,16 @@ export function TrafficChart({
         },
         color: {
           domain: [...BUCKET_ORDER],
-          range: [...BUCKET_COLORS],
+          range: [...bucketColors],
           legend: colorLegend({ label: "Bucket" }),
         },
         tooltip,
       }),
-    [rows, multiDay],
+    [rows, multiDay, bucketColors],
   );
 
   return (
-    <div className="chart">
+    <div className="mt-1">
       <Chart
         definition={definition}
         height={240}
@@ -198,6 +215,7 @@ export function PostureChart({
   );
 
   const present = useMemo(() => data.map((d) => d.origin), [data]);
+  const originColors = useOriginColors();
 
   const definition = useMemo(
     () =>
@@ -223,18 +241,16 @@ export function PostureChart({
           domain: present,
           range: present.map(
             (label) =>
-              ORIGIN_COLORS[
-                ORIGIN_ORDER.find((o) => ORIGIN_LABELS[o] === label) ?? "none"
-              ] ?? "#8b949e",
+              originColors[ORIGIN_ORDER.find((o) => ORIGIN_LABELS[o] === label) ?? "none"] ?? "",
           ),
         },
         tooltip,
       }),
-    [data, present],
+    [data, present, originColors],
   );
 
   return (
-    <div className="chart">
+    <div className="mt-1">
       <Chart
         definition={definition}
         height={96}
@@ -262,21 +278,23 @@ export function LatencyChart({ buckets }: { buckets: readonly number[] }): React
     [buckets],
   );
 
+  const colors = useStatusColors();
+
   const definition = useMemo(
     () =>
       defineChart({
-        marks: [barY(data, { x: "label", y: "count", fill: "#58a6ff", radius: 3 })],
+        marks: [barY(data, { x: "label", y: "count", fill: colors.info, radius: 3 })],
         scales: {
           x: { scale: () => scaleBand<string>().padding(0.25), axis: { label: "Duration" } },
           y: { scale: scaleLinear, nice: true, grid: true, axis: { label: "Requests" } },
         },
         tooltip,
       }),
-    [data],
+    [data, colors],
   );
 
   return (
-    <div className="chart">
+    <div className="mt-1">
       <Chart
         definition={definition}
         height={200}

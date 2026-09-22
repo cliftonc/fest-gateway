@@ -2,17 +2,29 @@
  * Shell: the session gate, navigation, the shared range control, and the page
  * switch.
  *
- * Screen order is the value order from the plan — credential posture first,
- * because "whose credential paid for this" is the compliance question this
- * gateway exists to answer, and it is the one an admin should not have to go
- * looking for.
+ * Screen order is landing order — the live feed first, because "is this thing
+ * working and what is going through it right now" is the question someone opens
+ * a gateway dashboard with. Routing sits immediately behind it: "whose
+ * credential paid for this" is the compliance question Fest exists to answer,
+ * and it should not need looking for.
  */
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Moon, Sun } from "lucide-react";
 import { PAGES, PAGE_TITLES, hrefFor, usePage } from "./lib/router.ts";
 import { DEFAULT_RANGE_ID, RANGE_OPTIONS, rangeFor } from "./lib/range.ts";
-import { PosturePage } from "./pages/Posture.tsx";
+import { useTheme } from "./lib/theme.tsx";
+import { NearformMark } from "./components/NearformMark.tsx";
+import { Button } from "./components/ui/button.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./components/ui/select.tsx";
+import { RoutingPage } from "./pages/Routing.tsx";
 import { LivePage } from "./pages/Live.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
 import { UsersPage } from "./pages/Users.tsx";
@@ -44,17 +56,17 @@ export function App(): React.JSX.Element {
     return () => window.removeEventListener("fest:unauthenticated", onUnauthenticated);
   }, [queryClient]);
 
-  if (me.isPending) return <div className="state">Loading…</div>;
+  if (me.isPending) return <div className="p-6 text-muted-foreground">Loading…</div>;
 
   // A failure to reach /api/auth/me at all is the gateway being down, not a
   // sign-in problem; saying "sign in" here would send the operator to fix the
   // wrong thing.
   if (me.isError) {
     return (
-      <div className="login">
-        <div className="login-card">
-          <div className="brand">Fest</div>
-          <p className="state bad">Cannot reach the gateway: {me.error.message}</p>
+      <div className="grid min-h-screen place-items-center p-6">
+        <div className="w-full max-w-sm rounded-xl bg-card p-6 ring-1 ring-foreground/10">
+          <Brand />
+          <p className="mt-4 text-status-bad">Cannot reach the gateway: {me.error.message}</p>
         </div>
       </div>
     );
@@ -73,6 +85,36 @@ export function App(): React.JSX.Element {
   return <Dashboard user={me.data.user} onSignedOut={() => void queryClient.invalidateQueries()} />;
 }
 
+export function Brand(): React.JSX.Element {
+  return (
+    <div className="flex items-start gap-2.5 px-2.5">
+      {/* Nearform made it; Fest is what it is called. The mark is attribution,
+          not the product's identity, so it stays small and quiet. */}
+      <NearformMark className="mt-0.5 h-5 w-5 shrink-0 text-foreground" />
+      <div className="leading-tight">
+        <div className="text-[17px] font-bold tracking-[0.02em]">Fest</div>
+        <div className="text-[11px] text-muted-foreground">self-hosted Claude Code gateway</div>
+      </div>
+    </div>
+  );
+}
+
+function ThemeToggle(): React.JSX.Element {
+  const { theme, toggleTheme } = useTheme();
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      onClick={toggleTheme}
+      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+    >
+      {theme === "dark" ? <Sun /> : <Moon />}
+    </Button>
+  );
+}
+
 function Dashboard({
   user,
   onSignedOut,
@@ -89,65 +131,82 @@ function Dashboard({
   const showRange = page !== "live";
 
   return (
-    <div className="app">
-      <nav className="side">
-        <div className="brand">
-          Fest
-          <small>self-hosted Claude Code gateway</small>
+    // The shell owns the viewport and only the main panel scrolls, so the
+    // identity and sign-out controls at the foot of the nav are reachable
+    // without scrolling back up through a feed that is still growing.
+    <div className="grid h-screen grid-cols-[210px_1fr] overflow-hidden">
+      <nav className="flex flex-col gap-1 overflow-y-auto border-r bg-sidebar p-3 pt-4.5">
+        <div className="pb-3.5">
+          <Brand />
         </div>
+
         {PAGES.filter((p) => p !== "admin" || user?.role !== "member").map((p) => (
           <a
             key={p}
-            className="nav-link"
             href={hrefFor(p)}
             aria-current={p === page ? "page" : undefined}
+            className="block rounded-md px-2.5 py-1.5 text-sidebar-foreground no-underline hover:bg-sidebar-accent aria-[current=page]:bg-sidebar-primary aria-[current=page]:font-medium aria-[current=page]:text-sidebar-primary-foreground"
           >
             {PAGE_TITLES[p]}
           </a>
         ))}
-        <div className="side-foot">
+
+        <div className="mt-auto p-2.5 text-[11.5px] text-muted-foreground">
           {user !== undefined && (
-            <div className="whoami">
-              <span title={user.email}>{user.email}</span>
-              <button
-                type="button"
-                onClick={() => void logout().then(onSignedOut)}
-              >
-                Sign out
-              </button>
+            <div className="mb-3 flex flex-col gap-1.5">
+              <span className="truncate text-foreground" title={user.email}>
+                {user.email}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void logout().then(onSignedOut)}
+                >
+                  Sign out
+                </Button>
+                <ThemeToggle />
+              </div>
             </div>
           )}
-          Metadata only — no prompts or responses are captured, and no
-          credential is ever stored.
+          Metadata only — no prompts or responses are captured, and no credential is ever stored.
         </div>
       </nav>
 
-      <main className="main">
-        <div className="page-head">
-          <div>
-            <h1>{PAGE_TITLES[page]}</h1>
-          </div>
+      <main className="overflow-y-auto">
+        <div className="max-w-[1400px] px-6 pt-5 pb-15">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+          <h1 className="text-xl font-semibold">{PAGE_TITLES[page]}</h1>
           {showRange && (
-            <div className="controls">
-              <label htmlFor="range">Range</label>
-              <select id="range" value={rangeId} onChange={(e) => setRangeId(e.target.value)}>
-                {RANGE_OPTIONS.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="range" className="text-xs text-muted-foreground">
+                Range
+              </label>
+              <Select value={rangeId} onValueChange={setRangeId}>
+                <SelectTrigger id="range" size="sm" className="w-[150px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RANGE_OPTIONS.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
         </div>
 
-        {page === "posture" && <PosturePage range={range} />}
         {page === "live" && <LivePage />}
+        {page === "routing" && <RoutingPage range={range} />}
         {page === "overview" && <OverviewPage range={range} />}
         {page === "users" && <UsersPage range={range} />}
         {page === "models" && <ModelsPage range={range} />}
         {page === "errors" && <ErrorsPage range={range} />}
         {page === "admin" && <AdminPage />}
+        </div>
       </main>
     </div>
   );

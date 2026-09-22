@@ -1,235 +1,273 @@
 /*
- * One stylesheet, no framework. The dashboard is six screens of tables,
- * numbers and three charts; a utility framework would be more bytes than the
- * application.
+ * Tailwind entry point and the design tokens everything else reads.
  *
- * Colour carries meaning in exactly one place — `tone-*` — and it is always
- * paired with text, because "the red one" is not information an admin can act
- * on over a screen share, and half of them cannot see it anyway.
+ * Structure and token names are shadcn's defaults, so `npx shadcn add <x>`
+ * keeps working without hand-patching every generated component. Only the
+ * *values* are ours: Nearform navy/green instead of the neutral preset.
+ *
+ * Two token sets live here and they are deliberately not merged:
+ *
+ *  - shadcn's UI-role tokens (`--background`, `--primary`, `--destructive`…),
+ *    which say what a piece of chrome is for.
+ *  - Fest's own status tones (`--status-*`), which say what a *number* means.
+ *    Colour carries meaning in exactly one place — the status tones — and it
+ *    is always paired with text, because "the red one" is not information an
+ *    admin can act on over a screen share, and half of them cannot see it
+ *    anyway.
+ *
+ * Collapsing the second set into the first would lose the distinction between
+ * "this badge is the accent colour" and "this request ran on a server-held
+ * key", which is the whole compliance story.
  */
 
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
+
+/* The theme is an explicit class on <html>, not a media query: an operator on
+   a light-mode laptop still wants the dark dashboard on the wall display. */
+@custom-variant dark (&:is(.dark *));
+
 :root {
-  --bg: #0e1116;
-  --panel: #161b22;
-  --panel-2: #1c232c;
-  --line: #2a323d;
-  --text: #e6edf3;
-  --muted: #8b949e;
-  --accent: #58a6ff;
-  --ok: #3fb950;
-  --warn: #d29922;
-  --bad: #f85149;
-  --sub: #a371f7;
-  --radius: 10px;
+  --radius: 0.625rem;
+
+  --background: #f6f8fa;
+  --foreground: #1f2328;
+  --card: #ffffff;
+  --card-foreground: #1f2328;
+  --popover: #ffffff;
+  --popover-foreground: #1f2328;
+
+  /* The darker Nearform green. The vivid #00e5a4 on white fails contrast, and
+     the brand guide warns off green-on-white text specifically. */
+  --primary: #07a06f;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f0f3f6;
+  --secondary-foreground: #1f2328;
+  --muted: #f0f3f6;
+  --muted-foreground: #636c76;
+  --accent: #f0f3f6;
+  --accent-foreground: #1f2328;
+  --destructive: #cf222e;
+  --destructive-foreground: #ffffff;
+  --border: #d8dee4;
+  --input: #d8dee4;
+  --ring: #07a06f;
+
+  /* Status tones. The old accent blue is not gone — it became --status-info,
+     because "informational" and "the brand colour" are different jobs and the
+     charts need both. */
+  --status-ok: #1a7f37;
+  --status-warn: #9a6700;
+  --status-bad: #cf222e;
+  --status-info: #0969da;
+  --status-sub: #8250df;
+
+  --chart-1: #07a06f;
+  --chart-2: #0969da;
+  --chart-3: #8250df;
+  --chart-4: #9a6700;
+  --chart-5: #636c76;
+
+  /* Categorical, for naming one model apart from another. Deliberately no
+     green: the token-bucket bars are a ramp of the brand green, and a model
+     that happened to be green would be indistinguishable from "output tokens"
+     in the chart directly above the one explaining it. */
+  --model-1: #0969da;
+  --model-2: #8250df;
+  --model-3: #9a6700;
+  --model-4: #bf3989;
+  --model-5: #0598a6;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1f2328;
+  --sidebar-primary: #07a06f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f0f3f6;
+  --sidebar-accent-foreground: #1f2328;
+  --sidebar-border: #d8dee4;
+  --sidebar-ring: #07a06f;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f8fa;
-    --panel: #ffffff;
-    --panel-2: #f0f3f6;
-    --line: #d8dee4;
-    --text: #1f2328;
-    --muted: #636c76;
-    --accent: #0969da;
-    --ok: #1a7f37;
-    --warn: #9a6700;
-    --bad: #cf222e;
-    --sub: #8250df;
+.dark {
+  --background: #0e1116;
+  --foreground: #e6edf3;
+  --card: #161b22;
+  --card-foreground: #e6edf3;
+  --popover: #161b22;
+  --popover-foreground: #e6edf3;
+
+  /* Nearform green, paired with deep navy the way the logo pairs them. */
+  --primary: #00e5a4;
+  --primary-foreground: #000e38;
+
+  --secondary: #1c232c;
+  --secondary-foreground: #e6edf3;
+  --muted: #1c232c;
+  --muted-foreground: #8b949e;
+  --accent: #1c232c;
+  --accent-foreground: #e6edf3;
+  --destructive: #f85149;
+  --destructive-foreground: #ffffff;
+  --border: #2a323d;
+  --input: #2a323d;
+  --ring: #00e5a4;
+
+  --status-ok: #3fb950;
+  --status-warn: #d29922;
+  --status-bad: #f85149;
+  --status-info: #58a6ff;
+  --status-sub: #a371f7;
+
+  --chart-1: #00e5a4;
+  --chart-2: #58a6ff;
+  --chart-3: #a371f7;
+  --chart-4: #d29922;
+  --chart-5: #8b949e;
+
+  /* See the light-mode block: categorical, and never green. */
+  --model-1: #58a6ff;
+  --model-2: #a371f7;
+  --model-3: #d29922;
+  --model-4: #f778ba;
+  --model-5: #39c5cf;
+
+  --sidebar: #161b22;
+  --sidebar-foreground: #e6edf3;
+  --sidebar-primary: #00e5a4;
+  --sidebar-primary-foreground: #000e38;
+  --sidebar-accent: #1c232c;
+  --sidebar-accent-foreground: #e6edf3;
+  --sidebar-border: #2a323d;
+  --sidebar-ring: #00e5a4;
+}
+
+@theme inline {
+  --font-sans: Inter, ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --font-heading: var(--font-sans);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-status-ok: var(--status-ok);
+  --color-status-warn: var(--status-warn);
+  --color-status-bad: var(--status-bad);
+  --color-status-info: var(--status-info);
+  --color-status-sub: var(--status-sub);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
   }
 }
 
-* { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
-}
-
-code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
-
-a { color: var(--accent); }
-
-/* ── Shell ─────────────────────────────────────────────────────────────── */
-
-.app { display: grid; grid-template-columns: 210px 1fr; min-height: 100vh; }
-
-.side {
-  border-right: 1px solid var(--line);
-  padding: 18px 12px;
-  background: var(--panel);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.brand { font-weight: 700; font-size: 17px; padding: 0 10px 14px; letter-spacing: 0.02em; }
-.brand small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; letter-spacing: 0; }
-
-.nav-link {
-  display: block;
-  padding: 7px 10px;
-  border-radius: 7px;
-  color: var(--text);
-  text-decoration: none;
-}
-.nav-link:hover { background: var(--panel-2); }
-.nav-link[aria-current="page"] { background: var(--accent); color: #fff; }
-
-.side-foot { margin-top: auto; padding: 10px; color: var(--muted); font-size: 11.5px; }
-
-.main { padding: 20px 24px 60px; max-width: 1400px; }
-
-.page-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-.page-head h1 { font-size: 20px; margin: 0; }
-.page-head .sub { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
-
-/* ── Cards, stats ──────────────────────────────────────────────────────── */
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-  margin-bottom: 16px;
-}
-.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
-.card-head h2 { font-size: 14px; margin: 0; }
-.card-head .sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; max-width: 70ch; }
-
-.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
-
-.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
-.stat-label { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
-.stat-value { font-size: 21px; font-weight: 600; margin-top: 2px; }
-.stat-note { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
-
-.tone-ok { color: var(--ok); }
-.tone-warn { color: var(--warn); }
-.tone-bad { color: var(--bad); }
-.tone-muted { color: var(--muted); }
-
-/* ── Pills, meters ─────────────────────────────────────────────────────── */
-
-.pill {
-  display: inline-block;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  border: 1px solid currentColor;
-  white-space: nowrap;
-}
-.pill.tone-ok { color: var(--ok); }
-.pill.tone-warn { color: var(--warn); }
-.pill.tone-bad { color: var(--bad); }
-.pill.tone-info { color: var(--accent); }
-.pill.tone-muted { color: var(--muted); }
-
-.meter { background: var(--panel-2); border-radius: 999px; height: 7px; overflow: hidden; min-width: 90px; }
-.meter-fill { height: 100%; border-radius: 999px; }
-.meter-fill.tone-ok { background: var(--ok); }
-.meter-fill.tone-warn { background: var(--warn); }
-.meter-fill.tone-bad { background: var(--bad); }
-.meter-fill.tone-info { background: var(--accent); }
-
-.muted { color: var(--muted); }
-.state { padding: 14px 2px; }
-.state.bad { color: var(--bad); }
-
-/* ── Tables ────────────────────────────────────────────────────────────── */
-
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th { color: var(--muted); font-weight: 500; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
-tbody tr:hover { background: var(--panel-2); }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-tr.is-new { animation: flash 1.2s ease-out; }
-@keyframes flash { from { background: rgba(88, 166, 255, 0.18); } to { background: transparent; } }
-
-/* ── Controls ──────────────────────────────────────────────────────────── */
-
-.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-
-select, button, input {
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 5px 9px;
-  font: inherit;
-  font-size: 13px;
-}
-button { cursor: pointer; }
-button:hover:not(:disabled) { border-color: var(--accent); }
-button:disabled { opacity: 0.5; cursor: default; }
-button.active { border-color: var(--accent); color: var(--accent); }
-
-label.check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
-
-.chart { margin-top: 4px; }
-
-.banner {
-  border: 1px solid var(--warn);
-  color: var(--warn);
-  border-radius: var(--radius);
-  padding: 9px 13px;
-  margin-bottom: 16px;
-  font-size: 13px;
-}
-.banner.bad { border-color: var(--bad); color: var(--bad); }
-
-.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
-.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
-
-/* ── Sign in ───────────────────────────────────────────────────────────── */
-
-.login { display: grid; place-items: center; min-height: 100vh; padding: 24px; }
-.login-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 24px;
-  width: min(380px, 100%);
-}
-.login-card .brand { padding: 0 0 16px; }
-.login-card .sub { color: var(--muted); font-size: 13px; line-height: 1.5; }
-.login-card form { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
-.login-card label { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 10px; }
-.login-card input { padding: 8px 10px; }
-.login-card button[type="submit"] { margin-top: 16px; padding: 8px; border-color: var(--accent); color: var(--accent); }
-.login-cmd {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 9px 11px;
+/* Two utilities rather than two hundred call-site edits: every table in the
+   dashboard marks its numeric cells, and the semantics ("this is a figure you
+   compare down a column") outlive whatever the styling happens to be. */
+@utility mono {
+  font-family: var(--font-mono);
   font-size: 12.5px;
-  overflow-x: auto;
 }
-.login-foot { color: var(--muted); font-size: 11.5px; margin: 18px 0 0; line-height: 1.5; }
 
-.login-oauth { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
-.login-oauth-button {
-  display: block;
-  text-align: center;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  color: var(--text);
-  text-decoration: none;
+@utility num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
-.login-oauth-button:hover { border-color: var(--accent); color: var(--accent); }
-.login-oauth .sub { text-align: center; margin: 4px 0 0; }
 
-.whoami { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
-.whoami span { overflow: hidden; text-overflow: ellipsis; color: var(--text); }
-.whoami button { padding: 3px 8px; font-size: 12px; }
+/*
+ * The arrival animations, kept as keyframes because they must decay on their
+ * own: a React state flip back to "not new" would need a timer per row, and at
+ * a few hundred rows a minute that is a lot of timers to get wrong.
+ */
+@keyframes fest-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The accent-bar glow for a newly arrived feed row. Green, and only on the
+   bar: flashing a whole error row green reads as "this one is fine", which is
+   the opposite of what it means. */
+@keyframes fest-glow {
+  from {
+    box-shadow: 0 0 10px 1px color-mix(in srgb, var(--primary) 70%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@utility animate-fest-enter {
+  animation: fest-enter 0.2s ease-out;
+}
+
+@utility animate-fest-glow {
+  animation: fest-glow 1.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fest-enter,
+  .animate-fest-glow {
+    animation: none;
+  }
+}

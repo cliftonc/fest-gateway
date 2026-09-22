@@ -42,7 +42,9 @@ export function cost(usd: number | null): string {
  * subscription count is never folded in: that usage was real and cost the org
  * nothing, and adding it as $0 would drag every average down.
  */
-export function costTotal(t: UsageTotalsWire): string {
+export function costTotal(
+  t: Pick<UsageTotalsWire, "pricedCostUsd" | "unpricedRequests">,
+): string {
   const base = `$${t.pricedCostUsd.toFixed(4)}`;
   return t.unpricedRequests > 0 ? `≥ ${base} (+${t.unpricedRequests} n/a)` : base;
 }
@@ -94,9 +96,29 @@ export const ORIGIN_LABELS: Readonly<Record<string, string>> = {
 
 export const originLabel = (o: string): string => ORIGIN_LABELS[o] ?? o;
 
-/** Unattributed usage surfaces as an empty id; name it, never hide it. */
-export const userLabel = (id: string | null, email?: string | null): string =>
-  email ?? (id === null || id === "" ? "unattributed" : id);
+/**
+ * A person, as a person.
+ *
+ * Unattributed usage surfaces as an empty id; it is named, never hidden.
+ *
+ * The domain is dropped because on a self-hosted install everyone shares it,
+ * so it is a column of identical text. An opaque `usr_…` id is not a name: it
+ * is shown truncated, because it is only there to tell two unknown callers
+ * apart, and at full length it crowds out everything else on the row.
+ */
+export function personLabel(id: string | null, email?: string | null): string {
+  if (email !== null && email !== undefined && email !== "") return email.replace(/@.*$/, "");
+  if (id === null || id === "") return "unattributed";
+  return id.length > 16 ? `${id.slice(0, 14)}…` : id;
+}
 
+/**
+ * A model id, shortened to the part that identifies it.
+ *
+ * Routed providers namespace their ids — `accounts/fireworks/models/kimi-k2p7-code`
+ * — and the prefix is identical for every model from that provider, so it is a
+ * column of repeated text pushing the distinguishing part out of view. The full
+ * id stays available as a tooltip wherever this is used.
+ */
 export const modelLabel = (m: string | null): string =>
-  m === null || m === "" ? "unresolved" : m;
+  m === null || m === "" ? "unresolved" : (m.split("/").pop() ?? m);
