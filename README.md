@@ -8,6 +8,9 @@ and route to different models without Claude Code knowing the difference.
 developer authenticates with their *own* subscription. Fest relays that
 credential and never stores it. Per-user pass-through, never pooling.
 
+<img width="2766" height="1404" alt="image" src="https://github.com/user-attachments/assets/4d1f48f6-01e8-473b-a529-b6d4ef8a7d44" />
+
+
 Three ways to read this, depending on what you want:
 
 | | |
