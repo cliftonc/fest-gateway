@@ -51,21 +51,39 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-function oauthCookie(name: string, value: string, secure: boolean): string {
+/**
+ * The narrow path these short-lived cookies are scoped to.
+ *
+ * It must be built from the mount point, not written as a constant: a cookie
+ * scoped to `/api/auth/oauth` is not sent to `/fest/api/auth/oauth/…`, so the
+ * state and verifier never come back and every sign-in fails the state check
+ * as "invalid or expired" — with nothing wrong with the sign-in at all.
+ */
+function oauthCookiePath(basePath: string): string {
+  return `${basePath}${OAUTH_COOKIE_PATH}`;
+}
+
+function oauthCookie(name: string, value: string, cfg: FestConfig): string {
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
-    `Path=${OAUTH_COOKIE_PATH}`,
+    `Path=${oauthCookiePath(cfg.basePath)}`,
     "HttpOnly",
     "SameSite=Lax",
     `Max-Age=${OAUTH_COOKIE_MAX_AGE_S}`,
   ];
-  if (secure) parts.push("Secure");
+  if (cfg.secureCookies) parts.push("Secure");
   return parts.join("; ");
 }
 
-function clearOauthCookie(name: string, secure: boolean): string {
-  const parts = [`${name}=`, `Path=${OAUTH_COOKIE_PATH}`, "HttpOnly", "SameSite=Lax", "Max-Age=0"];
-  if (secure) parts.push("Secure");
+function clearOauthCookie(name: string, cfg: FestConfig): string {
+  const parts = [
+    `${name}=`,
+    `Path=${oauthCookiePath(cfg.basePath)}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Max-Age=0",
+  ];
+  if (cfg.secureCookies) parts.push("Secure");
   return parts.join("; ");
 }
 
@@ -126,7 +144,7 @@ async function start(
   }
 
   const state = generateState();
-  const cookies = [oauthCookie(STATE_COOKIE, state, cfg.secureCookies)];
+  const cookies = [oauthCookie(STATE_COOKIE, state, cfg)];
 
   let authUrl: URL;
   if (provider === "google") {
@@ -136,7 +154,7 @@ async function start(
       return;
     }
     const verifier = generateCodeVerifier();
-    cookies.push(oauthCookie(VERIFIER_COOKIE, verifier, cfg.secureCookies));
+    cookies.push(oauthCookie(VERIFIER_COOKIE, verifier, cfg));
     authUrl = built.createAuthorizationURL(state, verifier, ["openid", "profile", "email"]);
   } else {
     const built = githubProvider(cfg);
@@ -147,7 +165,7 @@ async function start(
     authUrl = built.createAuthorizationURL(state, ["user:email"]);
   }
 
-  if (cliRedirect !== null) cookies.push(oauthCookie(CLI_REDIRECT_COOKIE, cliRedirect, cfg.secureCookies));
+  if (cliRedirect !== null) cookies.push(oauthCookie(CLI_REDIRECT_COOKIE, cliRedirect, cfg));
 
   res.setHeader("set-cookie", cookies);
   res.writeHead(302, { location: authUrl.toString() });
@@ -164,15 +182,19 @@ async function callback(
   const cookies = parseCookies(req.headers.cookie);
   const cliRedirect = cookies[CLI_REDIRECT_COOKIE] ?? null;
   const clearCookies = [
-    clearOauthCookie(STATE_COOKIE, cfg.secureCookies),
-    clearOauthCookie(VERIFIER_COOKIE, cfg.secureCookies),
-    clearOauthCookie(CLI_REDIRECT_COOKIE, cfg.secureCookies),
+    clearOauthCookie(STATE_COOKIE, cfg),
+    clearOauthCookie(VERIFIER_COOKIE, cfg),
+    clearOauthCookie(CLI_REDIRECT_COOKIE, cfg),
   ];
 
   const fail = (message: string): void => {
     res.setHeader("set-cookie", clearCookies);
+    // The dashboard root as the browser sees it. A bare `/` drops the mount
+    // path and lands the reader on whatever else is served at the origin root.
     const location =
-      cliRedirect !== null ? `${cliRedirect}?error=${encodeURIComponent(message)}` : `/?auth_error=${encodeURIComponent(message)}`;
+      cliRedirect !== null
+        ? `${cliRedirect}?error=${encodeURIComponent(message)}`
+        : `${cfg.basePath}/?auth_error=${encodeURIComponent(message)}`;
     res.writeHead(302, { location });
     res.end();
   };

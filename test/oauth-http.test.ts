@@ -291,3 +291,58 @@ function extractState(startResponse: Response): string {
   assert.ok(cookie);
   return decodeURIComponent(cookie!.slice("fest_oauth_state=".length));
 }
+
+/**
+ * Sub-path deployments. OAuth is the part of Fest most easily broken by a
+ * mount path, because it depends on cookies coming back on a *different*
+ * request than the one that set them — so a wrongly scoped cookie does not
+ * fail loudly, it fails as "invalid or expired sign-in attempt" with nothing
+ * actually wrong with the sign-in.
+ */
+
+/** Every Set-Cookie header, whole, so the attributes can be asserted. */
+function setCookies(res: Response): string[] {
+  return res.headers.getSetCookie();
+}
+
+test("the state cookie is scoped to the mount path, not to the origin root", async (t) => {
+  const h = await harness(t, { basePath: "/fest" });
+  // The proxy has stripped /fest, so the request arrives unprefixed — but the
+  // browser is at /fest/api/auth/oauth/..., which is what Path must match.
+  const res = await get(h.base, "/api/auth/oauth/google/start");
+  assert.equal(res.status, 302);
+
+  const cookies = setCookies(res);
+  assert.ok(cookies.length > 0, "start must set the state cookie");
+  for (const c of cookies) {
+    assert.match(
+      c,
+      /Path=\/fest\/api\/auth\/oauth/,
+      `a cookie scoped below the mount path is never sent back: ${c}`,
+    );
+  }
+});
+
+test("the root deployment keeps its unprefixed cookie path", async (t) => {
+  const h = await harness(t, { basePath: "" });
+  const res = await get(h.base, "/api/auth/oauth/google/start");
+  for (const c of setCookies(res)) {
+    assert.match(c, /Path=\/api\/auth\/oauth(;|$)/, c);
+  }
+});
+
+test("a failed sign-in redirects inside the mount path, not to the origin root", async (t) => {
+  const h = await harness(t, { basePath: "/fest" });
+  // No state cookie and no code: the callback fails and redirects the browser
+  // somewhere. Under a mount path, `/` is somebody else's application.
+  const res = await get(h.base, "/api/auth/oauth/google/callback?code=x&state=y");
+  assert.equal(res.status, 302);
+  const location = res.headers.get("location") ?? "";
+  assert.match(location, /^\/fest\/\?auth_error=/, location);
+});
+
+test("a failed sign-in on a root deployment still redirects to /", async (t) => {
+  const h = await harness(t, { basePath: "" });
+  const res = await get(h.base, "/api/auth/oauth/google/callback?code=x&state=y");
+  assert.match(res.headers.get("location") ?? "", /^\/\?auth_error=/);
+});
