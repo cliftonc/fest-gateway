@@ -25,6 +25,8 @@ import { handleAuth } from "../api/auth.ts";
 import { authorizeApi } from "../auth/guard.ts";
 import { handleModels } from "../api/models.ts";
 import { handleCountTokens } from "../pipeline/count-tokens.ts";
+import { handleMessages } from "../pipeline/passthrough.ts";
+import { splitBedrockMount, refuseUnconfigured } from "../pipeline/bedrock.ts";
 import { detectInbound } from "../auth/posture.ts";
 import type { LiveBus } from "../ingest/live-bus.ts";
 import { createStaticHost } from "./static.ts";
@@ -232,6 +234,50 @@ export function createServer(deps: ServerDeps): Server {
           const inm = req.headers["if-none-match"];
           handleModels(res, routesOf(), Array.isArray(inm) ? inm[0] : inm);
           return;
+        }
+
+        /**
+         * Claude in Amazon Bedrock, on the developer's own AWS credential.
+         *
+         * Checked BEFORE the Anthropic paths and handled by `handleMessages`
+         * directly rather than through `dispatchMessages`: this mount means
+         * "relay on MY credential", so routing — which could substitute a
+         * server-held key — must not get a vote. See `pipeline/bedrock.ts`.
+         */
+        // Split from `remainder`, not `path`: the query string has to survive.
+        // Phase 0 established that Claude Code calls `/v1/messages?beta=true`
+        // and that the parameter is load-bearing, so an override built from the
+        // bare pathname would quietly relay a different request.
+        const bedrockRemainder = splitBedrockMount(remainder);
+        if (bedrockRemainder !== null && method === "POST") {
+          if (deps.config.bedrockBaseUrl === null) {
+            refuseUnconfigured(res);
+            return;
+          }
+          const bedrockPath = pathnameOf(bedrockRemainder);
+          const bedrock = {
+            upstreamBaseUrl: deps.config.bedrockBaseUrl,
+            // Bedrock files some ids only under `bedrock_mantle/…`; without the
+            // hint Haiku 4.5 meters fine and prices as "n/a".
+            priceProvider: "bedrock_mantle",
+          };
+          if (bedrockPath === "/v1/messages") {
+            await handleMessages(req, res, { ...ctx, ...bedrock, pathOverride: bedrockRemainder });
+            return;
+          }
+          if (bedrockPath === "/v1/messages/count_tokens") {
+            const inbound = detectInbound(url, req.headers);
+            await handleCountTokens(req, res, {
+              upstreamBaseUrl: bedrock.upstreamBaseUrl,
+              path: bedrockRemainder,
+              posture: inbound.posture,
+            });
+            return;
+          }
+          // Any other path under the mount falls through to the 404 below: the
+          // mount forwards the two endpoints Bedrock actually serves, and
+          // inventing a relay for the rest would proxy traffic nobody has
+          // verified.
         }
 
         // Relayed, never metered: it consumes no tokens, and counting it would

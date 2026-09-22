@@ -29,6 +29,18 @@ export interface FestConfig {
    */
   readonly routesPath: string | null;
   /**
+   * Where `/bedrock/*` requests are relayed, or null to refuse them.
+   *
+   * Null is the default, and the mount does not exist until this is set: a
+   * developer's request can then only ever reach Anthropic, which is the same
+   * "no config, no new destinations" property `routesPath` has.
+   *
+   * It must include Bedrock's own `/anthropic` path segment
+   * (`https://bedrock-mantle.us-east-1.api.aws/anthropic`), because that is what
+   * the region's base URL actually is — see `pipeline/bedrock.ts`.
+   */
+  readonly bedrockBaseUrl: string | null;
+  /**
    * Marks the dashboard session cookie `Secure` and gives it the `__Host-`
    * prefix. Set it whenever Fest is reached over HTTPS — including behind a TLS
    * terminating proxy, where the server itself only ever sees plain HTTP and so
@@ -153,6 +165,28 @@ export function loadConfig(): FestConfig {
     throw new Error(`FEST_UPSTREAM_BASE_URL is not a valid URL: ${JSON.stringify(upstream)}`);
   }
 
+  /**
+   * Validated here rather than on first use: a typo in a Bedrock base URL would
+   * otherwise surface as a failed turn for one developer, hours later, with the
+   * gateway looking healthy.
+   */
+  const bedrock = stringFromEnv("FEST_BEDROCK_BASE_URL");
+  if (bedrock !== null) {
+    let parsed: URL;
+    try {
+      parsed = new URL(bedrock);
+    } catch {
+      throw new Error(`FEST_BEDROCK_BASE_URL is not a valid URL: ${JSON.stringify(bedrock)}`);
+    }
+    // A developer's AWS bearer crosses this hop. Loopback is exempt so a mock
+    // upstream stays testable, exactly as the routing table's rule works.
+    if (parsed.protocol !== "https:" && !["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)) {
+      throw new Error(
+        `FEST_BEDROCK_BASE_URL must be https (a developer's AWS bearer token would otherwise cross the network in plaintext)`,
+      );
+    }
+  }
+
   const port = intFromEnv("FEST_PORT", 8787);
   const host = (process.env.FEST_HOST ?? "127.0.0.1").trim();
   const publicUrl = (stringFromEnv("FEST_PUBLIC_URL") ?? `http://${host}:${port}`).replace(
@@ -169,6 +203,7 @@ export function loadConfig(): FestConfig {
     logLevel: level,
     requireIdentity: boolFromEnv("FEST_REQUIRE_IDENTITY", false),
     routesPath: (process.env.FEST_ROUTES ?? "").trim() || null,
+    bedrockBaseUrl: bedrock?.replace(/\/+$/, "") ?? null,
     secureCookies: boolFromEnv("FEST_SECURE_COOKIES", false),
     publicUrl,
     basePath: basePathFrom(stringFromEnv("FEST_BASE_PATH"), publicUrl),

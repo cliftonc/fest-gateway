@@ -123,6 +123,7 @@ docker compose run --rm fest token list | token revoke <id>
 | `FEST_SECURE_COOKIES` | set behind HTTPS. |
 | `FEST_ROUTES` | routing table path. Absent means everything passes through. See [docs/ROUTING.md](docs/ROUTING.md). |
 | `FEST_UPSTREAM_BASE_URL`, `FEST_LOG_LEVEL` | |
+| `FEST_BEDROCK_BASE_URL` | opens the `/bedrock` mount, relaying Claude-in-Bedrock traffic on the *caller's* AWS credential. Must include Bedrock's `/anthropic` segment. Unset means the mount refuses. |
 | `FEST_PRICING_REFRESH` | set `0` to never fetch prices. Rates then come only from the vendored snapshot, which is always sufficient. |
 | `FEST_PRICING_URL` | internal mirror of litellm's price file. |
 | `FEST_PUBLIC_URL` | base URL Fest is reachable at. Builds the OAuth redirect URI, and its path sets the mount point. Defaults to `http://<host>:<port>`. |
@@ -168,6 +169,78 @@ check needs; on nginx that is `proxy_set_header Host $host`, plus
 The registered OAuth redirect URI must include the path —
 `https://fest.corp.test/fest/api/auth/oauth/google/callback`. Developers point
 both Claude Code and the CLI at the full prefixed URL.
+
+### Amazon Bedrock, on the developer's own AWS credential
+
+Claude Code can talk to Claude in Amazon Bedrock directly, and Fest can sit in
+the middle of that without holding an AWS credential at all. The developer's own
+short-lived bearer is forwarded and forgotten — exactly the property the
+subscription path has — and Fest still meters, attributes and prices the traffic.
+
+Server side, one variable and a restart:
+
+```bash
+FEST_BEDROCK_BASE_URL=https://bedrock-mantle.us-east-1.api.aws/anthropic
+```
+
+That opens a `/bedrock` mount. Developers point Claude Code's Bedrock client at
+it, after their identity prefix:
+
+```bash
+CLAUDE_CODE_USE_MANTLE=1
+ANTHROPIC_BEDROCK_MANTLE_BASE_URL=http://127.0.0.1:8787/t/<their-token>/bedrock
+AWS_BEARER_TOKEN_BEDROCK=<minted with aws-bedrock-token-generator — 12 hours, maximum>
+```
+
+Nothing else changes: Bedrock's mantle endpoint serves the ordinary Messages API
+with ordinary SSE, so the request is a byte relay. Model ids are Bedrock's own
+(`anthropic.claude-opus-5`), sent by the client, and priced from litellm's
+Bedrock rates — including the 10% premium on a regional inference profile like
+`us.anthropic.claude-opus-5`, because that is what AWS invoices.
+
+**Why the developer holds the credential, and not the server.** Bedrock bearer
+tokens last 12 hours at most. Fest resolves credentials from `{env:NAME}` only,
+and nothing can rewrite a running process's environment, so a server-held
+Bedrock token would mean restarting the gateway twice a day. The client can
+refresh its own: `awsAuthRefresh` and `awsCredentialExport` are Claude Code
+credential helpers, and the client maps both to the mantle base URL. The
+renewal loop lives next to the SSO session, which is the only thing that can
+mint a token non-interactively anyway. A useful side effect: AWS sees each
+developer's own identity, so CloudTrail attributes calls to a person rather than
+to one shared token.
+
+The corollary is that **this is not a way to give developers Bedrock access they
+do not already have.** Each one needs an AWS identity permitted to call Bedrock.
+If that is the thing you are trying to avoid, Fest would have to sign SigV4
+itself — a real `bedrock` adapter, not a config change, and not built.
+
+Five things worth knowing:
+
+- **The routing table gets no vote here.** A `/bedrock` request is always a
+  pass-through on the caller's own credential. A rule matching
+  `anthropic.claude-*` cannot divert it onto a server-held key, because the
+  mount never enters the routing fork at all — asserted in
+  `test/bedrock-http.test.ts`.
+- **It is org spend, recorded honestly.** Rows land as `inbound_key` with basis
+  `list`: the caller's own key paid, AWS bills the org, and the dashboard says
+  so rather than counting it as a subscription that cost nothing.
+- **`FEST_BEDROCK_BASE_URL` must include Bedrock's `/anthropic` segment**, since
+  that is genuinely part of the region's base URL. Fest concatenates rather than
+  resolving, so the segment survives.
+- **Requests to the mount are refused, not redirected, when it is unset.** A
+  501 naming the variable, because falling through would send an AWS bearer to
+  `api.anthropic.com` and return a 401 that explains nothing.
+- **Start these sessions with `claude`, not `fest claude`.** The CLI strips
+  every variable that demotes a developer off their subscription, and
+  `CLAUDE_CODE_USE_MANTLE` is one of them — so `fest claude` would quietly put
+  a Bedrock-configured shell back on the developer's own plan. That is the
+  right default everywhere else; here it is the wrong command.
+
+Two Bedrock things Fest does **not** do. Non-Claude models on Bedrock, and
+Claude on the older `InvokeModel`/`Converse` integration (`CLAUDE_CODE_USE_BEDROCK`
+rather than `CLAUDE_CODE_USE_MANTLE`), both use a different wire shape —
+`/model/{id}/invoke`, AWS eventstream framing, `model` moved out of the body.
+Neither is a byte relay, so neither is a config change.
 
 ---
 

@@ -21,7 +21,10 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   request; `passthrough.ts` relays the subscription path byte-for-byte,
   deliberately *not* using the adapter interface; `substitute.ts` routes
   through a server-held credential; `record.ts` builds the usage record;
-  `count-tokens.ts` handles `/v1/messages/count_tokens`.
+  `count-tokens.ts` handles `/v1/messages/count_tokens`; `bedrock.ts` is the
+  `/bedrock` mount, which relays Claude-in-Bedrock traffic on the CALLER's own
+  AWS bearer and deliberately bypasses routing (a rule must never be able to
+  substitute a server-held key there).
 - **`adapters/`** — per-provider substitute-path adapters (`anthropic.ts`,
   `fireworks.ts`). An adapter is a credential + model-id swap, not a wire
   translator — Fireworks serves an Anthropic-compatible `/v1/messages`, so

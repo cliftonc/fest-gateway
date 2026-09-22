@@ -37,6 +37,7 @@ import { createSseParser } from "../http/sse.ts";
 import { createUsageAccumulator, usageFromJson } from "../usage/accumulator.ts";
 import { priceUsage } from "../usage/pricing.ts";
 import { pipeWithTee, beginStream } from "../http/pipe.ts";
+import { joinUpstreamUrl } from "../adapters/url.ts";
 import { isSubscriptionCredential } from "../secret/fingerprint.ts";
 import type { UsageSink } from "../ingest/sink.ts";
 import { badIdentity, noIdentity, noUpstreamCredential } from "../auth/gateway-401.ts";
@@ -47,6 +48,25 @@ const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
 export interface PassthroughContext {
   readonly upstreamBaseUrl: string;
+  /**
+   * Path to request upstream, when it is not the one the client sent.
+   *
+   * Set only by the Bedrock mount, which strips its own prefix — the developer
+   * configured `…/bedrock`, and `/bedrock/v1/messages` is not a path any
+   * upstream serves. Nothing else may use this: rewriting the path a caller
+   * asked for is the kind of "helpful" transform the byte-for-byte rule exists
+   * to keep out of this file, and the mount is a Fest-side URL convention
+   * rather than part of the request.
+   */
+  readonly pathOverride?: string | undefined;
+  /**
+   * litellm provider key for pricing, when the served ids need one.
+   *
+   * Bedrock files some ids only under `bedrock_mantle/…`, so without this the
+   * dashboard shows tokens and an honest "n/a" for spend. Undefined means "look
+   * the id up as given", which is right for Anthropic's own ids.
+   */
+  readonly priceProvider?: string | undefined;
   readonly sink: UsageSink;
   readonly requireIdentity: boolean;
   /** Org that owns this deployment. Single-org for now, column exists regardless. */
@@ -225,7 +245,10 @@ export async function handleMessages(
     return;
   }
 
-  const target = new URL(inbound.effectivePath, ctx.upstreamBaseUrl);
+  // `joinUpstreamUrl`, not `new URL(path, base)`: URL resolution throws away a
+  // base URL's own path, which silently drops Bedrock's `/anthropic` segment
+  // and turns every request into a 404 nobody can read off the config.
+  const target = joinUpstreamUrl(ctx.upstreamBaseUrl, ctx.pathOverride ?? inbound.effectivePath);
   const headers = buildUpstreamHeaders(req.headers, {
     posture: inbound.posture,
     upstreamHost: target.host,
@@ -352,7 +375,7 @@ export async function handleMessages(
     } catch {
       // A body we cannot read is still relayed; we just report less.
     }
-    const priced = priceUsage(peek.model, usage, isSubscription);
+    const priced = priceUsage(peek.model, usage, isSubscription, ctx.priceProvider);
     res.writeHead(upstream.status, downstream);
     res.end(text);
     finish({
@@ -384,7 +407,7 @@ export async function handleMessages(
     for (const event of parser.flush()) acc.apply(event);
 
     const usage = acc.snapshot();
-    const priced = priceUsage(peek.model, usage, isSubscription);
+    const priced = priceUsage(peek.model, usage, isSubscription, ctx.priceProvider);
     const streamErr = acc.streamError();
 
     /**
@@ -428,7 +451,7 @@ export async function handleMessages(
     // truncated stream. Never retry: partial text is already on screen.
     for (const event of parser.flush()) acc.apply(event);
     const usage = acc.snapshot();
-    const priced = priceUsage(peek.model, usage, isSubscription);
+    const priced = priceUsage(peek.model, usage, isSubscription, ctx.priceProvider);
     log.warn("upstream stream failed mid-flight", { id, error: String(err).slice(0, 200) });
     if (!res.writableEnded) {
       res.write(sseErrorEvent("api_error", "Fest: upstream connection closed mid-stream."));

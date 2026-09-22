@@ -15,6 +15,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { anthropicError } from "../http/errors.ts";
 import { readBodyBytes, isTooLarge } from "../http/body.ts";
 import { buildUpstreamHeaders } from "../http/headers.ts";
+import { joinUpstreamUrl } from "../adapters/url.ts";
 import type { Posture } from "../../shared/types.ts";
 import { log } from "../log.ts";
 
@@ -32,7 +33,10 @@ export async function handleCountTokens(
     return;
   }
 
-  const target = new URL(opts.path, opts.upstreamBaseUrl);
+  // Concatenate rather than resolve: `new URL("/v1/…", "https://h/anthropic")`
+  // drops the base's own path, which is exactly the shape a Bedrock upstream
+  // has. See `adapters/url.ts`.
+  const target = joinUpstreamUrl(opts.upstreamBaseUrl, opts.path);
   try {
     const upstream = await fetch(target, {
       method: "POST",
