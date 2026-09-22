@@ -56,6 +56,7 @@
  */
 
 import type { UsagePayload, CostBasis, CredentialAttempt } from "../../shared/types.ts";
+import { NON_ERROR_STATUSES } from "../../shared/types.ts";
 import type { Cost } from "../usage/cost.ts";
 import { cacheHitRatio } from "../usage/pricing.ts";
 import type { Store } from "./db.ts";
@@ -237,19 +238,29 @@ function str(v: unknown, fallback = ""): string {
 /**
  * "Is an error" — ONE definition, and it is the writer's.
  *
- * `server/store/write.ts` increments `usage_hourly.errors` when
- * `status !== 'ok'`, so the raw path must use the same predicate or the same
+ * `server/store/write.ts` increments `usage_hourly.errors` from
+ * `isErrorStatus`, so the raw path must use the same predicate or the same
  * range would report different error counts depending on which side of the
- * 2-hour threshold it fell. In particular this includes `identity_denied`
- * (a rejected request, recorded on purpose so an admin can see auth failures)
- * and `client_abort`, neither of which necessarily carries an `error_type`.
+ * 2-hour threshold it fell. Both are now generated from `NON_ERROR_STATUSES`
+ * rather than written out twice, because the previous pair of hand-written
+ * conditions was one edit away from disagreeing.
+ *
+ * This includes `identity_denied` (a rejected request, recorded on purpose so
+ * an admin can see auth failures) and `client_abort`, neither of which
+ * necessarily carries an `error_type`. It excludes `preflight_refused`, which
+ * is an expected refusal of Claude Code's warmup ping — see
+ * `server/pipeline/preflight.ts`.
  *
  * NOTE: this means the `requests_errors` partial index — predicated on
  * `error_type IS NOT NULL` — does not cover this predicate. Matching the
  * numbers matters more than matching the index; see the report accompanying
- * this module.
+ * this module. The `status <> 'ok'` partial index from migration 002 is still
+ * usable, since this narrower predicate implies it.
+ *
+ * Interpolation is safe: `NON_ERROR_STATUSES` is a closed literal union, never
+ * user input.
  */
-const RAW_IS_ERROR = "r.status <> 'ok'";
+const RAW_IS_ERROR = `r.status NOT IN (${NON_ERROR_STATUSES.map((s) => `'${s}'`).join(", ")})`;
 
 // ── Feed ──────────────────────────────────────────────────────────────────────
 

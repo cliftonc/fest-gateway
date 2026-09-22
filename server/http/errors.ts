@@ -9,6 +9,8 @@
  * internal condition.
  */
 
+import { redactSecrets } from "../secret/fingerprint.ts";
+
 export type AnthropicErrorType =
   | "invalid_request_error"
   | "authentication_error"
@@ -50,6 +52,106 @@ export function statusForErrorType(type: AnthropicErrorType): number {
     case "overloaded_error":
       return 529;
   }
+}
+
+/**
+ * How much of an upstream's error message to keep.
+ *
+ * Longer than the 200 chars used for exception strings, deliberately. An
+ * exception string is self-describing by its first clause; a provider's
+ * validation error is not — the actionable part is a field path that can sit
+ * well into the text ("context_management.edits.0: Extra inputs are not
+ * permitted"), and a provider may echo a chunk of the offending request before
+ * saying what was wrong with it. Truncating to 200 reliably cut the answer off.
+ */
+const MAX_UPSTREAM_MESSAGE = 500;
+
+/** What a non-2xx upstream response told us, ready to record and to relay. */
+export interface UpstreamFailure {
+  /** The body, byte-for-byte as received. Relay this; never re-serialise it. */
+  readonly text: string;
+  readonly type: string;
+  readonly message: string;
+}
+
+/**
+ * Best-effort type for an upstream that sent no parseable error envelope.
+ *
+ * Derived from the status so `error_type` is never null on a failed request:
+ * a row that knows only "400" is barely more useful than no row, and the
+ * dashboard already groups by this column.
+ */
+function typeForStatus(status: number): string {
+  switch (status) {
+    case 400:
+      return "invalid_request_error";
+    case 401:
+      return "authentication_error";
+    case 403:
+      return "permission_error";
+    case 404:
+      return "not_found_error";
+    case 429:
+      return "rate_limit_error";
+    case 529:
+      return "overloaded_error";
+    default:
+      return status >= 500 ? "api_error" : "invalid_request_error";
+  }
+}
+
+function firstString(...candidates: unknown[]): string | null {
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim() !== "") return c.trim();
+  }
+  return null;
+}
+
+/**
+ * Read a failed upstream response into something worth storing.
+ *
+ * Fest relayed these bodies to the client and recorded nothing but the status,
+ * so the one field a developer needs — WHY the provider refused — existed only
+ * in their terminal, and only until it scrolled. Every non-2xx landed in the
+ * database with `error_type` and `error_message` null.
+ *
+ * Shapes handled: Anthropic and Fireworks both nest `{ error: { type, message } }`;
+ * some gateways flatten it, or send `error` as a bare string, or send no JSON at
+ * all. An unparseable body is not a failure to report — the raw text is the
+ * message, truncated. The result is always populated.
+ */
+export function describeUpstreamFailure(status: number, text: string): UpstreamFailure {
+  const fallbackType = typeForStatus(status);
+  let type: string | null = null;
+  let message: string | null = null;
+
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed === "object" && parsed !== null) {
+      const top = parsed as Record<string, unknown>;
+      const err = top["error"];
+      if (typeof err === "object" && err !== null) {
+        const e = err as Record<string, unknown>;
+        type = firstString(e["type"], e["code"]);
+        message = firstString(e["message"], e["detail"]);
+      } else {
+        message = firstString(err);
+      }
+      type ??= firstString(top["type"] === "error" ? null : top["type"], top["code"]);
+      message ??= firstString(top["message"], top["detail"]);
+    }
+  } catch {
+    // Not JSON. The body itself is the most informative thing we have.
+  }
+
+  return {
+    text,
+    type: type ?? fallbackType,
+    // Redacted on the way in, not on the way out: this string is about to be
+    // persisted, and an upstream that echoes the offending request back could
+    // echo a credential header with it.
+    message: redactSecrets(message ?? text).slice(0, MAX_UPSTREAM_MESSAGE),
+  };
 }
 
 /**

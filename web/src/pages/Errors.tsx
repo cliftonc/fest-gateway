@@ -14,6 +14,13 @@
  *  - A 401 is expected periodically and is NOT an error to chase: Claude Code
  *    refreshes its own OAuth token against Anthropic directly and retries. Fest
  *    forwards the 401 untouched precisely so that latch keeps working.
+ *
+ * Deliberately absent: the 429 Anthropic returns for Claude Code's session-start
+ * warmup ping on a subscription bearer. It is recorded as `preflight_refused`
+ * and excluded from every error count — see `server/pipeline/preflight.ts`. If
+ * you are looking for it because you saw it in the gateway log or in Claude
+ * Code itself, that is why it is not here. A real rate limit still appears:
+ * it arrives with quota headers, and the preflight refusal does not.
  */
 
 import { useQuery } from "@tanstack/react-query";

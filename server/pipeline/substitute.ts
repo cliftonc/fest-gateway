@@ -28,7 +28,12 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { CredentialAttempt, RequestStatus, UsageRecord } from "../../shared/types.ts";
 import { EMPTY_USAGE } from "../../shared/types.ts";
-import { anthropicError, statusForErrorType, sseErrorEvent } from "../http/errors.ts";
+import {
+  anthropicError,
+  statusForErrorType,
+  sseErrorEvent,
+  describeUpstreamFailure,
+} from "../http/errors.ts";
 import { buildDownstreamHeaders } from "../http/headers.ts";
 import { createSseParser } from "../http/sse.ts";
 import { createUsageAccumulator, usageFromJson } from "../usage/accumulator.ts";
@@ -200,6 +205,45 @@ export async function handleSubstitute(
 
   const common = { ...base, httpStatus: response.status, upstreamRequestId };
 
+  // ── upstream refused ───────────────────────────────────────────────────────
+  /**
+   * Handled before the stream/non-stream split — see the same block in
+   * `passthrough.ts` for why. It matters more here: this path can reach a
+   * provider whose validation rules are its own, so "which field did Fireworks
+   * object to" is a question only its error body can answer, and a substituted
+   * request that fails is exactly the one an operator has to explain.
+   */
+  if (!response.ok) {
+    const failure = describeUpstreamFailure(response.status, await response.text());
+    // Logged as well as recorded — see the same block in `passthrough.ts`. The
+    // route and upstream ids are here because on this path the first question
+    // is always "which provider, chosen by which rule".
+    log.warn("upstream refused", {
+      id: ctx.base.id,
+      status: response.status,
+      type: failure.type,
+      message: failure.message,
+      requestedModel: decision.requestedModel,
+      servedModel: decision.servedModel,
+      stream: ctx.stream,
+      bytesIn: plan.body.byteLength,
+      pipeline: "substitute",
+      upstream: upstream.id,
+      route: decision.route?.id ?? null,
+      upstreamRequestId,
+    });
+    res.writeHead(response.status, buildDownstreamHeaders(response.headers, { stream: false }));
+    res.end(failure.text);
+    finishWith({
+      ...common,
+      status: "upstream_error",
+      bytesOut: Buffer.byteLength(failure.text),
+      errorType: failure.type,
+      errorMessage: failure.message,
+    });
+    return;
+  }
+
   // ── non-streaming ──────────────────────────────────────────────────────────
   if (!ctx.stream || response.body === null) {
     const text = await response.text();
@@ -217,7 +261,7 @@ export async function handleSubstitute(
     res.end(text);
     finishWith({
       ...common,
-      status: response.ok ? "ok" : "upstream_error",
+      status: "ok",
       usage,
       costUsd: priced.cost,
       costBasis: priced.basis,
@@ -248,20 +292,16 @@ export async function handleSubstitute(
     const streamErr = acc.streamError();
 
     /**
-     * A non-2xx upstream response is an ERROR even when the body streamed
-     * cleanly.
+     * Only a 2xx reaches here — a non-2xx was recorded and relayed above, which
+     * is what keeps a provider that refuses everything from reading as a zero
+     * error rate. (It once did: status was derived purely from client aborts
+     * and in-band SSE error events, so a provider refusing before emitting any
+     * event produced a tidy, successful-looking record.)
      *
-     * Missed until a real 400 came back from a provider mid-stream and was
-     * recorded as `ok`: the status was derived only from client aborts and
-     * in-band SSE error events, so an upstream that refuses BEFORE emitting any
-     * events produced a tidy, successful-looking record. The effect is an error
-     * rate that reads as zero precisely when a provider is rejecting
-     * everything.
-     *
-     * Ordering: a client abort still wins, because the developer walking away
-     * is the more specific fact about what happened.
+     * A client abort still wins over an in-band stream error: the developer
+     * walking away is the more specific fact about what happened.
      */
-    let status: RequestStatus = response.ok ? "ok" : "upstream_error";
+    let status: RequestStatus = "ok";
     if (result.clientAborted) status = "client_abort";
     else if (streamErr) status = "stream_error";
 

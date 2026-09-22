@@ -26,6 +26,7 @@ import { api } from "../lib/api.ts";
 import { rangeFor } from "../lib/range.ts";
 import { subscribeLive } from "../lib/sse.ts";
 import { useLiveWindow, type LiveEvent } from "../hooks/useLiveWindow.ts";
+import { isErrorStatus, type RequestStatus } from "../../../shared/types.ts";
 import { ActivityPulse, modelColor } from "../components/live/ActivityPulse.tsx";
 import { LiveControls } from "../components/live/LiveControls.tsx";
 import { LiveStats } from "../components/live/LiveStats.tsx";
@@ -49,7 +50,11 @@ function rollup(
     const k = keyOf(e);
     const cur = out.get(k) ?? { requests: 0, errors: 0, context: 0, cacheWrite: 0, output: 0 };
     cur.requests += 1;
-    if (e.status !== "ok") cur.errors += 1;
+    // The same predicate the writer and the query layer use, imported rather
+    // than re-spelled — this was a third hand-written copy of `!== "ok"`, and
+    // the live window disagreeing with the range below it is exactly the kind
+    // of "which number do I believe" an operator cannot resolve on their own.
+    if (isErrorStatus(e.status as RequestStatus)) cur.errors += 1;
     cur.context += e.context;
     cur.cacheWrite += e.cacheWrite;
     cur.output += e.output;

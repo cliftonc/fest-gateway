@@ -26,7 +26,12 @@ import type {
 import { EMPTY_USAGE } from "../../shared/types.ts";
 import { detectInbound } from "../auth/posture.ts";
 import { buildUpstreamHeaders, buildDownstreamHeaders, parseRateLimit } from "../http/headers.ts";
-import { anthropicError, statusForErrorType, sseErrorEvent } from "../http/errors.ts";
+import {
+  anthropicError,
+  statusForErrorType,
+  sseErrorEvent,
+  describeUpstreamFailure,
+} from "../http/errors.ts";
 import { readBodyBytes, isTooLarge, peekRequest } from "../http/body.ts";
 import { createSseParser } from "../http/sse.ts";
 import { createUsageAccumulator, usageFromJson } from "../usage/accumulator.ts";
@@ -35,6 +40,7 @@ import { pipeWithTee, beginStream } from "../http/pipe.ts";
 import { isSubscriptionCredential } from "../secret/fingerprint.ts";
 import type { UsageSink } from "../ingest/sink.ts";
 import { badIdentity, noIdentity, noUpstreamCredential } from "../auth/gateway-401.ts";
+import { isWarmupPreflightRefusal } from "./preflight.ts";
 import { log } from "../log.ts";
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -268,6 +274,75 @@ export async function handleMessages(
     rateLimit,
   };
 
+  // ── upstream refused ───────────────────────────────────────────────────────
+  /**
+   * Handled before the stream/non-stream split, because a refusal is the same
+   * shape either way: a short JSON body instead of an SSE stream, even when the
+   * client asked for one. Buffering it costs nothing and is the only chance to
+   * read it — a teed stream is relayed and discarded.
+   *
+   * This is the response whose CONTENT matters most and the one Fest used to
+   * record least. It recorded the status and dropped the reason, so a row said
+   * "400" and nothing about which field the provider objected to; the answer
+   * reached the developer's terminal and lived only until it scrolled.
+   */
+  if (!upstream.ok) {
+    const failure = describeUpstreamFailure(upstream.status, await upstream.text());
+
+    /**
+     * Anthropic refusing the session-start warmup ping is expected and benign —
+     * see `preflight.ts`. It still gets a row, with the provider's own reason
+     * on it, because a thing that happens is worth recording; it just is not a
+     * failure and is not warned about, or every session would open with an
+     * error in the dashboard and a warning in the log.
+     */
+    const preflight = isWarmupPreflightRefusal({
+      httpStatus: upstream.status,
+      stream: peek.stream,
+      maxTokens: peek.maxTokens,
+      rateLimit,
+      subscription: isSubscription,
+    });
+
+    /**
+     * Logged as well as recorded, because the database is the wrong place to
+     * find out something is broken NOW. Fest logs nothing per request by
+     * design — a gateway that narrates every relay is unreadable — but a
+     * refusal is not routine traffic, and a developer watching an error appear
+     * in their client had no way to see the reason without querying SQLite.
+     *
+     * `rateLimit` rides along: a 429 that carries no quota headers is a
+     * different fact from one that does, and that difference is invisible in
+     * the status alone.
+     */
+    if (!preflight) {
+      log.warn("upstream refused", {
+        id,
+        status: upstream.status,
+        type: failure.type,
+        message: failure.message,
+        model: peek.model,
+        stream: peek.stream,
+        bytesIn: body.byteLength,
+        pipeline: "passthrough",
+        upstreamRequestId,
+        rateLimit,
+      });
+    }
+    // `stream: false`: whatever the client asked for, this is a JSON error, and
+    // framing it as a stream would tell the client to expect SSE it won't get.
+    res.writeHead(upstream.status, buildDownstreamHeaders(upstream.headers, { stream: false }));
+    res.end(failure.text);
+    finish({
+      ...base,
+      status: preflight ? "preflight_refused" : "upstream_error",
+      bytesOut: Buffer.byteLength(failure.text),
+      errorType: failure.type,
+      errorMessage: failure.message,
+    });
+    return;
+  }
+
   // ── non-streaming ──────────────────────────────────────────────────────────
   if (!peek.stream || !upstream.body) {
     const text = await upstream.text();
@@ -282,7 +357,7 @@ export async function handleMessages(
     res.end(text);
     finish({
       ...base,
-      status: upstream.ok ? "ok" : "upstream_error",
+      status: "ok",
       usage,
       costUsd: priced.cost,
       costBasis: priced.basis,
@@ -313,20 +388,17 @@ export async function handleMessages(
     const streamErr = acc.streamError();
 
     /**
-     * A non-2xx upstream response is an ERROR even when the body streamed
-     * cleanly.
+     * Only a 2xx reaches here — a non-2xx was recorded and relayed above, which
+     * is what keeps an upstream that refuses everything from reading as a zero
+     * error rate. (It once did: status was derived purely from client aborts
+     * and in-band SSE error events, so a provider refusing before emitting any
+     * event produced a tidy, successful-looking record.)
      *
-     * Missed until a real 400 came back from a provider mid-stream and was
-     * recorded as `ok`: the status was derived only from client aborts and
-     * in-band SSE error events, so an upstream that refuses BEFORE emitting any
-     * events produced a tidy, successful-looking record. The effect is an error
-     * rate that reads as zero precisely when a provider is rejecting
-     * everything.
-     *
-     * Ordering: a client abort still wins, because the developer walking away
-     * is the more specific fact about what happened.
+     * What remains are failures that happen once the stream is under way, and
+     * a client abort wins over them: the developer walking away is the more
+     * specific fact about what happened.
      */
-    let status: RequestStatus = upstream.ok ? "ok" : "upstream_error";
+    let status: RequestStatus = "ok";
     if (result.clientAborted) status = "client_abort";
     else if (streamErr) status = "stream_error";
 

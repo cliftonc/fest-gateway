@@ -123,7 +123,35 @@ export type RequestStatus =
   | "stream_error"
   | "upstream_error"
   | "identity_denied"
-  | "bad_request";
+  | "bad_request"
+  /**
+   * Anthropic refused Claude Code's session-start warmup ping on a
+   * subscription bearer. Recorded, never counted as a failure.
+   *
+   * See `server/pipeline/preflight.ts` for the exact predicate and the capture
+   * that established it. Its own status rather than a suppressed row, because
+   * "this happened and it is expected" is a different claim from "this did not
+   * happen", and only one of them is true.
+   */
+  | "preflight_refused";
+
+/**
+ * Statuses that are NOT failures — the single definition, in the one place both
+ * the writer and the query layer can import.
+ *
+ * `server/store/write.ts` increments `usage_hourly.errors` from this, and
+ * `server/store/queries.ts` builds its raw-range SQL predicate from it. They
+ * must agree exactly: the rollup takes over at 2 hours, so a disagreement makes
+ * the same range report different error counts depending on which side of that
+ * threshold it falls on. Keeping the list here rather than writing the
+ * condition out twice is what stops the two drifting.
+ */
+export const NON_ERROR_STATUSES = ["ok", "preflight_refused"] as const satisfies
+  readonly RequestStatus[];
+
+export function isErrorStatus(status: RequestStatus): boolean {
+  return !(NON_ERROR_STATUSES as readonly string[]).includes(status);
+}
 
 /**
  * Where the credential that served this request came from.

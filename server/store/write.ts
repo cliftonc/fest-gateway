@@ -20,6 +20,7 @@
  */
 
 import type { UsageRecord } from "../../shared/types.ts";
+import { isErrorStatus } from "../../shared/types.ts";
 import type { Store } from "./db.ts";
 import { log } from "../log.ts";
 
@@ -279,7 +280,8 @@ function rollupParams(orgId: string, record: UsageRecord): Params[] {
     credential_origin: record.credentialOrigin,
     cost_basis: record.costBasis,
     requests: 1,
-    errors: record.status !== "ok" ? 1 : 0,
+    // Shared with the raw-range predicate in `queries.ts`; see NON_ERROR_STATUSES.
+    errors: isErrorStatus(record.status) ? 1 : 0,
     input_tokens: usage.inputTokens,
     cache_read_tokens: usage.cacheReadTokens,
     cache_write_5m_tokens: usage.cacheWrite5mTokens,

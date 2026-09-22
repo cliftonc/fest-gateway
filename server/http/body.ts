@@ -54,6 +54,12 @@ export function isTooLarge(v: Uint8Array<ArrayBuffer> | BodyTooLarge): v is Body
 export interface RequestPeek {
   readonly model: string | null;
   readonly stream: boolean;
+  /**
+   * `max_tokens`, which tells a one-token warmup ping apart from real work.
+   * Null when absent or not a number — never coerced, because "asked for 1" and
+   * "did not say" are different facts and only one of them identifies a ping.
+   */
+  readonly maxTokens: number | null;
 }
 
 /**
@@ -65,13 +71,17 @@ export interface RequestPeek {
 export function peekRequest(bytes: Uint8Array): RequestPeek {
   try {
     const parsed: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
-    if (parsed === null || typeof parsed !== "object") return { model: null, stream: false };
+    if (parsed === null || typeof parsed !== "object") {
+      return { model: null, stream: false, maxTokens: null };
+    }
     const obj = parsed as Record<string, unknown>;
+    const maxTokens = obj["max_tokens"];
     return {
       model: typeof obj["model"] === "string" ? obj["model"] : null,
       stream: obj["stream"] === true,
+      maxTokens: typeof maxTokens === "number" && Number.isFinite(maxTokens) ? maxTokens : null,
     };
   } catch {
-    return { model: null, stream: false };
+    return { model: null, stream: false, maxTokens: null };
   }
 }
