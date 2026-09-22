@@ -27,7 +27,16 @@ export default defineConfig({
     proxy: {
       // `ws: false` and no buffering: /api/live is SSE, and Vite's proxy will
       // happily hold an event stream unless told the response is streamed.
-      "/api": { target: API_TARGET, changeOrigin: true, ws: false },
+      //
+      // `changeOrigin` MUST stay false. The gateway's CSRF defence is an
+      // origin check — it compares the browser's `Origin` against the request's
+      // `Host` (server/auth/guard.ts). Rewriting Host to the gateway's address
+      // while the browser still sends the dev server's origin makes those two
+      // disagree, and every POST comes back 403 "cross-origin request refused":
+      // sign-in and sign-out silently stop working in dev while OAuth, being a
+      // GET, keeps going. The gateway does not route on Host, so there is
+      // nothing to gain by rewriting it.
+      "/api": { target: API_TARGET, changeOrigin: false, ws: false },
     },
   },
 });

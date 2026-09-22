@@ -124,6 +124,7 @@ function Dashboard({
 }): React.JSX.Element {
   const page = usePage();
   const [rangeId, setRangeId] = useState(DEFAULT_RANGE_ID);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const range = rangeFor(rangeId);
 
   // The live feed is its own clock; a range picker on it would imply it shows
@@ -163,12 +164,22 @@ function Dashboard({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => void logout().then(onSignedOut)}
+                  onClick={() => {
+                    setSignOutError(null);
+                    void logout()
+                      .then(onSignedOut)
+                      .catch((e: unknown) =>
+                        setSignOutError(e instanceof Error ? e.message : "sign out failed"),
+                      );
+                  }}
                 >
                   Sign out
                 </Button>
                 <ThemeToggle />
               </div>
+              {/* A refused sign-out used to do nothing at all, which reads as a
+                  dead button rather than as the server saying no. */}
+              {signOutError !== null && <span className="text-status-bad">{signOutError}</span>}
             </div>
           )}
           Metadata only — no prompts or responses are captured, and no credential is ever stored.

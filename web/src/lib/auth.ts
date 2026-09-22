@@ -42,5 +42,12 @@ export async function login(email: string, password: string): Promise<MeResponse
 }
 
 export async function logout(): Promise<void> {
-  await post("/api/auth/logout");
+  // The status is checked, not discarded. A refused sign-out leaves a live
+  // session behind, and reporting success for it would tell an operator their
+  // session is closed when it is not — the one lie this call must never tell.
+  const res = await post("/api/auth/logout");
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? `HTTP ${res.status}`);
+  }
 }
