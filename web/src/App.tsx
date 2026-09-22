@@ -93,7 +93,6 @@ export function Brand(): React.JSX.Element {
       <NearformMark className="mt-0.5 h-5 w-5 shrink-0 text-foreground" />
       <div className="leading-tight">
         <div className="text-[17px] font-bold tracking-[0.02em]">Fest</div>
-        <div className="text-[11px] text-muted-foreground">self-hosted Claude Code gateway</div>
       </div>
     </div>
   );
