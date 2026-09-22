@@ -1,6 +1,6 @@
 {
   "name": "fest-gateway",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Self-hosted Claude Code gateway: per-user subscription pass-through, central token/cost monitoring, model routing.",
   "license": "MIT",
