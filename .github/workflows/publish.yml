@@ -1,0 +1,69 @@
+name: Publish
+
+# Publishing is tied to a GitHub Release rather than to a tag or a branch: the
+# release is the human decision, and it carries the notes that explain what a
+# version number cannot.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  # `id-token: write` is the whole authentication story. npm trusted publishing
+  # exchanges this short-lived OIDC token for publish rights, so there is no
+  # NPM_TOKEN in this repository's secrets to leak, rotate or forget.
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/fest-gateway
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # Trusted publishing needs npm >= 11.5.1, which is newer than the npm
+      # bundled with any current Node release. Without this the publish falls
+      # back to asking for a token and fails.
+      - name: Use an npm that can do trusted publishing
+        run: npm install -g npm@latest
+
+      - run: npm ci
+
+      # A release tagged v0.2.0 that ships 0.1.0 is worse than a failed
+      # release: the tag, the notes and the registry disagree afterwards, and
+      # npm versions cannot be replaced.
+      - name: Check the release tag matches package.json
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::release tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+          echo "publishing $pkg"
+
+      # The same gate CI applies. A release is the one moment it is most
+      # tempting to skip it and the worst moment to have skipped it.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # `prepack` builds the dashboard and compiles server/, shared/ and cli/
+      # into dist/, so there is no separate build step here by design — the
+      # artifact is built by the same hook a local `npm pack` would run.
+      - name: Publish to npm
+        run: npm publish --access public

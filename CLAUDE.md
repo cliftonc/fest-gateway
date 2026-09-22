@@ -18,6 +18,15 @@ npm run cli -- <cmd>       # the fest CLI, e.g. `npm run cli -- whoami`
 npm run canary               # version gate — re-run before rolling out a new Claude Code release
 ```
 
+## Releasing
+
+Bump `version` in `package.json`, then publish a GitHub Release tagged
+`v<version>`. `.github/workflows/publish.yml` re-runs the gate and publishes
+via npm trusted publishing (OIDC) — there is no NPM_TOKEN in the repo, and the
+workflow refuses to publish if the tag and `package.json` disagree. CI
+(`ci.yml`) runs the same gate on every push and PR, plus one check this repo
+cannot make locally: it installs the packed tarball and runs the binary.
+
 Published to npm as `fest-gateway`, installing a `fest` binary. Publishing is
 the one flow that does not run the TypeScript directly: Node refuses to strip
 types under `node_modules`, so `npm run build:package` compiles `server/`,

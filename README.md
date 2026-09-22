@@ -1,5 +1,8 @@
 # Fest
 
+[![CI](https://github.com/cliftonc/fest-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/cliftonc/fest-gateway/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/fest-gateway.svg)](https://www.npmjs.com/package/fest-gateway)
+
 A self-hosted gateway for Claude Code. Teams point their Claude Code at Fest the
 way they'd point at Bedrock, so one place can monitor requests, tokens and cost —
 and route to different models without Claude Code knowing the difference.

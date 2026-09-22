@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor from package.json's engines, and current. The floor is not
+        # decoration: the server is run as TypeScript by Node's native type
+        # stripping, so "which Node" is a correctness question here rather than
+        # a compatibility nicety.
+        node: ["22.18", "24"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build the dashboard
+        run: npm run build
+
+      # The published package cannot be TypeScript — Node refuses to strip
+      # types under node_modules. That break is invisible in this repo, where
+      # everything runs from source, and only appears once someone installs it.
+      # So CI installs the real tarball and runs the real binary.
+      - name: Smoke-test the packed CLI as an installed package
+        run: |
+          set -euo pipefail
+          npm pack --pack-destination /tmp
+          version=$(node -p "require('./package.json').version")
+          npm install -g --prefix /tmp/cli-install "/tmp/fest-gateway-${version}.tgz"
+          /tmp/cli-install/bin/fest --help
+          # `whoami` exercises the cli/ half, which the help text does not reach.
+          HOME=/tmp/cli-home /tmp/cli-install/bin/fest whoami
