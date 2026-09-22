@@ -36,6 +36,7 @@ import {
   Table,
   TableCell,
   TableRow,
+  numCol,
 } from "../components/ui.tsx";
 import { LatencyChart } from "../components/charts.tsx";
 import { ms, num } from "../lib/format.ts";
@@ -86,7 +87,7 @@ export function ErrorsPage({ range }: { range: Range }): React.JSX.Element {
             <Stat label="Distinct causes" value={num(rows.length)} />
           </StatRow>
 
-          <Table head={["Cause", "HTTP", "Count", "What it means"]}>
+          <Table head={["Cause", numCol("HTTP"), numCol("Count"), "What it means"]}>
             {rows.map((row) => (
               <TableRow key={`${row.errorType ?? "none"}:${row.httpStatus ?? "none"}`}>
                 <TableCell>

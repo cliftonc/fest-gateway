@@ -17,6 +17,7 @@ import { PAGES, PAGE_TITLES, hrefFor, usePage } from "./lib/router.ts";
 import { DEFAULT_RANGE_ID, RANGE_OPTIONS, rangeFor } from "./lib/range.ts";
 import { useTheme } from "./lib/theme.tsx";
 import { NearformMark } from "./components/NearformMark.tsx";
+import { GithubMark } from "./components/GithubMark.tsx";
 import { Button } from "./components/ui/button.tsx";
 import {
   Select,
@@ -36,6 +37,8 @@ import { LoginPage } from "./pages/Login.tsx";
 import { fetchMe, logout } from "./lib/auth.ts";
 import { useCliAuthorizeHandoff } from "./lib/cli-authorize.ts";
 import { SetupCliPanel, SetupCliToggle, useSetupCli } from "./components/SetupCli.tsx";
+
+const REPO_URL = "https://github.com/cliftonc/fest-gateway";
 
 export function App(): React.JSX.Element {
   const queryClient = useQueryClient();
@@ -145,8 +148,21 @@ function Dashboard({
     // without scrolling back up through a feed that is still growing.
     <div className="grid h-screen grid-cols-[210px_1fr] overflow-hidden">
       <nav className="flex flex-col gap-1 overflow-y-auto border-r bg-sidebar p-3 pt-4.5">
-        <div className="pb-3.5">
+        <div className="flex items-start justify-between gap-2 pb-3.5">
           <Brand />
+          {/* Where this came from, one click away. Quiet by default — it is
+              provenance, not navigation, and should not compete with the
+              screens below it. */}
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noreferrer noopener"
+            aria-label="Fest on GitHub"
+            title="Fest on GitHub"
+            className="mt-0.5 shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <GithubMark className="size-4" />
+          </a>
         </div>
 
         {PAGES.filter((p) => p !== "admin" || user?.role !== "member").map((p) => (

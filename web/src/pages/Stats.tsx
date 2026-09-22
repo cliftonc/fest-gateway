@@ -37,6 +37,7 @@ import {
   TableCell,
   TableRow,
   TONE_TEXT,
+  numCol,
 } from "../components/ui.tsx";
 import { Alert, AlertDescription } from "../components/ui/alert.tsx";
 import {
@@ -220,7 +221,15 @@ export function StatsPage({ range }: { range: Range }): React.JSX.Element {
           />
 
           <Table
-            head={["Credential origin", "Requests", "People", "Errors", "Tokens", "Cost", "At list rates"]}
+            head={[
+              "Credential origin",
+              numCol("Requests"),
+              numCol("People"),
+              numCol("Errors"),
+              numCol("Tokens"),
+              numCol("Cost"),
+              numCol("At list rates"),
+            ]}
           >
             {origins.map((row) => (
               <TableRow key={row.credentialOrigin}>

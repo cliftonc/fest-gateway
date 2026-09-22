@@ -215,11 +215,22 @@ export function QueryState({
   return <>{children}</>;
 }
 
+/**
+ * A column heading. Write `"Developer"` for text, `numCol("Requests")` for a
+ * figure — the heading then right-aligns with the `num` cells beneath it, which
+ * are right-aligned so they can be compared down the column. A plain string
+ * over a column of numbers leaves the label floating at the far left of its own
+ * values, which is what this type exists to make hard to do by accident.
+ */
+export type Column = string | { readonly label: string; readonly num: true };
+
+export const numCol = (label: string): Column => ({ label, num: true });
+
 export function Table({
   head,
   children,
 }: {
-  head: readonly string[];
+  head: readonly Column[];
   children: ReactNode;
 }): React.JSX.Element {
   return (
@@ -227,14 +238,25 @@ export function Table({
       <ShadTable>
         <TableHeader>
           <TableRow>
-            {head.map((h) => (
-              <TableHead
-                key={h}
-                className="text-[11.5px] tracking-wide whitespace-nowrap uppercase"
-              >
-                {h}
-              </TableHead>
-            ))}
+            {head.map((h) => {
+              const label = typeof h === "string" ? h : h.label;
+              const isNum = typeof h !== "string";
+              return (
+                <TableHead
+                  key={label}
+                  // `text-right` as well as `num`, and not instead of it.
+                  // TableHead hard-codes `text-left`, and tailwind-merge only
+                  // drops that when it sees a utility it recognises as the same
+                  // property — `num` is a custom `@utility`, so on its own it
+                  // survives the merge and then loses to `text-left` anyway.
+                  className={`text-[11.5px] tracking-wide whitespace-nowrap uppercase${
+                    isNum ? " num text-right" : ""
+                  }`}
+                >
+                  {label}
+                </TableHead>
+              );
+            })}
           </TableRow>
         </TableHeader>
         <TableBody>{children}</TableBody>

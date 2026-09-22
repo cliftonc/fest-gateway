@@ -11,7 +11,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api, type Range } from "../lib/api.ts";
-import { Card, Muted, Pill, QueryState, Table, TableCell, TableRow } from "../components/ui.tsx";
+import { Card, Muted, Pill, QueryState, Table, TableCell, TableRow, numCol } from "../components/ui.tsx";
 import { Alert, AlertDescription } from "../components/ui/alert.tsx";
 import { contextTokens, costTotal, notionalTotal, num, personLabel, ratio, tokens } from "../lib/format.ts";
 
@@ -49,14 +49,14 @@ export function UsersPage({ range }: { range: Range }): React.JSX.Element {
           <Table
             head={[
               "Developer",
-              "Requests",
-              "On subscription",
-              "Errors",
-              "Context",
-              "Output",
-              "Cache hit",
-              "Org spend",
-              "At list rates",
+              numCol("Requests"),
+              numCol("On subscription"),
+              numCol("Errors"),
+              numCol("Context"),
+              numCol("Output"),
+              numCol("Cache hit"),
+              numCol("Org spend"),
+              numCol("At list rates"),
             ]}
           >
             {rows.map((row) => (

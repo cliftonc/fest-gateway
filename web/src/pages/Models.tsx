@@ -12,7 +12,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api, type Range } from "../lib/api.ts";
-import { Card, Muted, QueryState, Table, TableCell, TableRow } from "../components/ui.tsx";
+import { Card, Muted, QueryState, Table, TableCell, TableRow, numCol } from "../components/ui.tsx";
 import { costTotal, modelLabel, notionalTotal, num, ratio, tokens } from "../lib/format.ts";
 
 export function ModelsPage({ range }: { range: Range }): React.JSX.Element {
@@ -32,15 +32,15 @@ export function ModelsPage({ range }: { range: Range }): React.JSX.Element {
         <Table
           head={[
             "Model",
-            "Requests",
-            "Input",
-            "Cache read",
-            "Cache write 5m",
-            "Cache write 1h",
-            "Output",
-            "Cache hit",
-            "Org spend",
-            "At list rates",
+            numCol("Requests"),
+            numCol("Input"),
+            numCol("Cache read"),
+            numCol("Cache write 5m"),
+            numCol("Cache write 1h"),
+            numCol("Output"),
+            numCol("Cache hit"),
+            numCol("Org spend"),
+            numCol("At list rates"),
           ]}
         >
           {rows.map((row) => (
