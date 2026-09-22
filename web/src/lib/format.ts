@@ -35,6 +35,30 @@ export function cost(usd: number | null): string {
 }
 
 /**
+ * The lower-bound marker, in one place.
+ *
+ * A total that omits rows it could not price is not an exact figure and must
+ * never be shown as one. Written once here because it is now applied on three
+ * sets of books — billed, notional, and the live boards' own tallies — and an
+ * accounting rule spelled out per caller is exactly how the live window ended
+ * up disagreeing with the server about what counts as an error.
+ */
+export const lowerBound = (base: string, unpriced: number): string =>
+  unpriced > 0 ? `≥ ${base}` : base;
+
+/**
+ * A dollar magnitude at the precision it deserves.
+ *
+ * Four places under a dollar, because a cached Claude Code turn is routinely
+ * worth less than a cent and `$0.00` reads as free; two above, because
+ * `$1,204.0000` is noise. `costTotal` and `notionalTotal` keep their own fixed
+ * precision — this is for the live boards, where one row can be a fraction of a
+ * cent while another is tens of dollars and both must stay legible.
+ */
+export const usd = (n: number): string =>
+  n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+
+/**
  * A cost TOTAL, which is a different thing from a cost.
  *
  * `pricedCostUsd` sums only the rows that could be priced, so whenever
@@ -50,8 +74,7 @@ export function cost(usd: number | null): string {
 export function costTotal(
   t: Pick<UsageTotalsWire, "pricedCostUsd" | "unpricedRequests">,
 ): string {
-  const base = `$${t.pricedCostUsd.toFixed(4)}`;
-  return t.unpricedRequests > 0 ? `≥ ${base}` : base;
+  return lowerBound(`$${t.pricedCostUsd.toFixed(4)}`, t.unpricedRequests);
 }
 
 /**
@@ -68,8 +91,7 @@ export function costTotal(
 export function notionalTotal(
   t: Pick<UsageTotalsWire, "notionalCostUsd" | "notionalUnpricedRequests">,
 ): string {
-  const base = `~$${t.notionalCostUsd.toFixed(2)}`;
-  return t.notionalUnpricedRequests > 0 ? `≥ ${base}` : base;
+  return lowerBound(`~$${t.notionalCostUsd.toFixed(2)}`, t.notionalUnpricedRequests);
 }
 
 export const ratio = (r: number | null): string => (r === null ? "n/a" : pct.format(r));

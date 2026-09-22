@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FeedRowWire } from "../../../shared/api.ts";
+import { isErrorStatus, type RequestStatus } from "../../../shared/types.ts";
 import { cacheWriteTokens, contextTokens } from "../lib/format.ts";
 
 export interface LiveEvent {
@@ -57,6 +58,19 @@ export interface LiveWindow {
 
 /** How many slices the sparkline is drawn in, whatever the window length. */
 const BUCKETS = 60;
+
+/**
+ * The shared predicate, imported rather than re-spelled.
+ *
+ * This used to be a hand-written `status !== "ok"` in two places here, which
+ * made it the only counter in the codebase that disagreed with
+ * `NON_ERROR_STATUSES`: Claude Code's session-start warmup ping is recorded as
+ * `preflight_refused` precisely so it is NOT a failure, and every server-side
+ * count honours that. The headline "failing" figure did not, so it reported a
+ * failure at the start of every session — directly above rollup boards, on the
+ * same screen, that said otherwise.
+ */
+const isError = (e: LiveEvent): boolean => isErrorStatus(e.status as RequestStatus);
 
 export function toEvent(row: FeedRowWire): LiveEvent {
   return {
@@ -126,7 +140,7 @@ export function useLiveWindow(windowMs: number): {
       const idx = BUCKETS - 1 - Math.floor((base - e.at) / bucketMs);
       if (idx < 0 || idx >= BUCKETS) continue;
       counts[idx] = (counts[idx] ?? 0) + 1;
-      if (e.status !== "ok") errs[idx] = (errs[idx] ?? 0) + 1;
+      if (isError(e)) errs[idx] = (errs[idx] ?? 0) + 1;
     }
 
     const buckets: RateBucket[] = counts.map((c, i) => ({
@@ -136,7 +150,7 @@ export function useLiveWindow(windowMs: number): {
     }));
 
     const total = inWindow.length;
-    const errors = inWindow.filter((e) => e.status !== "ok").length;
+    const errors = inWindow.filter(isError).length;
 
     return {
       events: inWindow,

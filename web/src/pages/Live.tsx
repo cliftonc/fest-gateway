@@ -34,41 +34,50 @@ import { RollupBoard, type RollupEntry } from "../components/live/RollupBoard.ts
 import { DeveloperAvatar } from "../components/live/DeveloperAvatar.tsx";
 import { Badge } from "../components/ui/badge.tsx";
 import { costTotal, modelLabel, notionalTotal, originLabel, personLabel } from "../lib/format.ts";
+import { useMeasure } from "../hooks/useMeasure.ts";
+import {
+  compareByMeasure,
+  emptyTally,
+  isLowerBound,
+  magnitude,
+  tallyAdd,
+  type MeasureTally,
+} from "../lib/measure.ts";
 
 const DEFAULT_WINDOW_MS = 300_000;
 
-/** Roll the window up by some key, summing the things the boards draw. */
-function rollup(
-  events: readonly LiveEvent[],
-  keyOf: (e: LiveEvent) => string,
-): Map<string, { requests: number; errors: number; context: number; cacheWrite: number; output: number }> {
-  const out = new Map<
-    string,
-    { requests: number; errors: number; context: number; cacheWrite: number; output: number }
-  >();
+interface Rolled {
+  requests: number;
+  errors: number;
+  /** Every magnitude this key can be drawn at; the measure picks one. */
+  tally: MeasureTally;
+}
+
+/** Roll the window up by some key, on all three sets of books at once. */
+function rollup(events: readonly LiveEvent[], keyOf: (e: LiveEvent) => string): Map<string, Rolled> {
+  const out = new Map<string, Rolled>();
   for (const e of events) {
     const k = keyOf(e);
-    const cur = out.get(k) ?? { requests: 0, errors: 0, context: 0, cacheWrite: 0, output: 0 };
+    let cur = out.get(k);
+    if (cur === undefined) {
+      cur = { requests: 0, errors: 0, tally: emptyTally() };
+      out.set(k, cur);
+    }
     cur.requests += 1;
     // The same predicate the writer and the query layer use, imported rather
     // than re-spelled — this was a third hand-written copy of `!== "ok"`, and
     // the live window disagreeing with the range below it is exactly the kind
     // of "which number do I believe" an operator cannot resolve on their own.
     if (isErrorStatus(e.status as RequestStatus)) cur.errors += 1;
-    cur.context += e.context;
-    cur.cacheWrite += e.cacheWrite;
-    cur.output += e.output;
-    out.set(k, cur);
+    tallyAdd(cur.tally, e);
   }
   return out;
 }
 
-const totalTokens = (v: { context: number; cacheWrite: number; output: number }): number =>
-  v.context + v.cacheWrite + v.output;
-
 export function LivePage(): React.JSX.Element {
   const queryClient = useQueryClient();
   const [windowMs, setWindowMs] = useState(DEFAULT_WINDOW_MS);
+  const { measure, setMeasure } = useMeasure();
   const [connected, setConnected] = useState(false);
   const [paused, setPaused] = useState(false);
 
@@ -132,30 +141,31 @@ export function LivePage(): React.JSX.Element {
 
   const byModel = useMemo<RollupEntry[]>(() => {
     const m = rollup(events, (e) => e.model);
-    // Ranked here so the swatch a model gets on this board is the same colour
-    // it has in the pulse above it.
-    const ranked = [...m.entries()].sort((a, b) => totalTokens(b[1]) - totalTokens(a[1]));
-    return ranked.map(([model, v], i) => ({
-      key: model,
+    // Ranked here, with the same comparator the board itself uses, so the
+    // swatch a model gets is the colour it has in the pulse above. These were
+    // two separate sorts that happened to agree; now they agree by
+    // construction, which matters the moment the measure can change the order.
+    const ranked = [...m.entries()]
+      .map(([model, v]) => ({ key: model, ...v }))
+      .sort(compareByMeasure(measure));
+    return ranked.map((v, i) => ({
+      key: v.key,
       label: (
         <>
           <span
             className="inline-block size-2 shrink-0 rounded-sm"
             style={{ background: modelColor(i) }}
           />
-          <span className="mono truncate text-xs" title={model === "" ? "unresolved" : model}>
-            {modelLabel(model)}
+          <span className="mono truncate text-xs" title={v.key === "" ? "unresolved" : v.key}>
+            {modelLabel(v.key)}
           </span>
         </>
       ),
-      value: totalTokens(v),
       requests: v.requests,
-      context: v.context,
-      cacheWrite: v.cacheWrite,
-      output: v.output,
       errors: v.errors,
+      tally: v.tally,
     }));
-  }, [events]);
+  }, [events, measure]);
 
   const byUser = useMemo<RollupEntry[]>(() => {
     const m = rollup(events, (e) => e.userId ?? "");
@@ -170,70 +180,81 @@ export function LivePage(): React.JSX.Element {
             <span className="truncate text-xs">{label}</span>
           </>
         ),
-        value: totalTokens(v),
         requests: v.requests,
-        context: v.context,
-        cacheWrite: v.cacheWrite,
-        output: v.output,
         errors: v.errors,
+        tally: v.tally,
       };
     });
   }, [events, emailById]);
 
   /** Ranked top-first: the pulse colours its stack by this order. */
   const rankedModels = useMemo(
-    () => [...byModel].sort((a, b) => b.value - a.value).map((m) => m.key),
-    [byModel],
+    () => [...byModel].sort(compareByMeasure(measure)).map((m) => m.key),
+    [byModel, measure],
   );
 
+  // Request share, deliberately measure-independent: "who paid" is a question
+  // about how many calls went which way, not about how big they were.
   const byOrigin = useMemo(() => {
     const m = rollup(events, (e) => e.origin);
     return [...m.entries()]
-      .map(([origin, v]) => ({ origin, ...v, total: totalTokens(v) }))
+      .map(([origin, v]) => ({ origin, ...v }))
       .sort((a, b) => b.requests - a.requests);
   }, [events]);
 
   const stats = useMemo(() => {
     const minutes = windowMs / 60_000;
-    const tokenSum = events.reduce((a, e) => a + e.context + e.cacheWrite + e.output, 0);
-    const subscription = events.filter((e) => e.subscription).length;
+
+    // One pass on all three sets of books. The accounting rules — subscription
+    // work is never priced, an unpriceable row makes a total a lower bound —
+    // live in `tallyAdd` and are not restated here.
+    const tally = emptyTally();
+    for (const e of events) tallyAdd(tally, e);
+
+    /*
+     * "On own subscription" is a question about WHOSE CREDENTIAL served the
+     * request, so it is counted from the credential origin.
+     *
+     * It used to count `costBasis === "subscription"`, which quietly excluded
+     * every row that produced no usage — including the session-start warmup
+     * ping, which by definition only happens on a subscription bearer. The note
+     * beside this figure and the origin bar below it both read
+     * `credentialOrigin`, so the headline was the odd one out.
+     */
+    const subscription = events.filter((e) => e.origin === "inbound_subscription").length;
     const serverKey = events.filter((e) => e.origin === "fallback_server").length;
     const developers = new Set(events.map((e) => e.userId ?? "")).size;
 
-    // The same accounting rule the rest of the dashboard follows: only priced
-    // rows are summed, unpriceable ones are counted so the figure can be shown
-    // as the lower bound it is, and subscription usage is never given a price.
-    const priced = events.filter((e) => !e.subscription && e.costUsd !== null);
-    const unpriced = events.filter((e) => !e.subscription && e.costUsd === null).length;
-
-    // Value runs on its own books: subscription rows are EXCLUDED above and
-    // INCLUDED here, which is the whole reason both numbers are shown.
-    const valued = events.filter((e) => e.notionalCostUsd !== null);
-
     return {
       perMinute: win.total / minutes,
-      tokensPerMinute: tokenSum / minutes,
+      rate: magnitude(tally, measure) / minutes,
+      rateLowerBound: isLowerBound(tally, measure),
       errorRatio: win.errorRatio,
       developers,
       subscriptionShare: win.total === 0 ? null : subscription / win.total,
       serverKeyRequests: serverKey,
+      // Unchanged, and deliberately NOT following the measure: this pair is the
+      // one place on the page the two sets of books are seen side by side, and
+      // a switch that hid one of them would delete the comparison.
       spend: costTotal({
-        pricedCostUsd: priced.reduce((a, e) => a + (e.costUsd ?? 0), 0),
-        unpricedRequests: unpriced,
+        pricedCostUsd: tally.billedUsd,
+        unpricedRequests: tally.billedUnpriced,
       }),
       value: notionalTotal({
-        notionalCostUsd: valued.reduce((a, e) => a + (e.notionalCostUsd ?? 0), 0),
-        notionalUnpricedRequests: events.length - valued.length,
+        notionalCostUsd: tally.valueUsd,
+        notionalUnpricedRequests: tally.valueUnpriced,
       }),
-      subscriptionRequests: subscription,
+      subscriptionRequests: tally.subscriptionRequests,
     };
-  }, [events, win, windowMs]);
+  }, [events, win, windowMs, measure]);
 
   return (
     <div className="flex flex-col gap-3">
       <LiveControls
         windowMs={windowMs}
         onWindowMs={setWindowMs}
+        measure={measure}
+        onMeasure={setMeasure}
         connected={connected}
         paused={paused}
         onPaused={setPaused}
@@ -245,6 +266,7 @@ export function LivePage(): React.JSX.Element {
         windowMs={windowMs}
         models={rankedModels}
         live={connected && !paused}
+        measure={measure}
       />
 
       {rankedModels.length > 0 && (
@@ -274,7 +296,9 @@ export function LivePage(): React.JSX.Element {
 
       <LiveStats
         perMinute={stats.perMinute}
-        tokensPerMinute={stats.tokensPerMinute}
+        measure={measure}
+        rate={stats.rate}
+        rateLowerBound={stats.rateLowerBound}
         errorRatio={stats.errorRatio}
         developers={stats.developers}
         subscriptionShare={stats.subscriptionShare}
@@ -286,11 +310,13 @@ export function LivePage(): React.JSX.Element {
           title="By model"
           entries={byModel}
           emptyText="No traffic in this window yet."
+          measure={measure}
         />
         <RollupBoard
           title="Top developers"
           entries={byUser}
           emptyText="No traffic in this window yet."
+          measure={measure}
         />
       </div>
 
