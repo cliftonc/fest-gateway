@@ -1,0 +1,24 @@
+// The published package cannot ship TypeScript.
+//
+// Node runs this repository's .ts directly during development, but it refuses
+// to strip types from anything under node_modules
+// (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), with no flag to opt back in.
+// So an installed copy of Fest has to be JavaScript, and this config is the
+// only place that emits any.
+//
+// `rewriteRelativeImportExtensions` is what makes it work unchanged: the source
+// imports "./config.ts" because that is what Node wants when running the
+// TypeScript, and tsc rewrites those specifiers to "./config.js" on the way out.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "rewriteRelativeImportExtensions": true,
+    "declaration": false,
+    "sourceMap": true
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts", "cli/**/*.ts"],
+  "exclude": ["node_modules", "web", "test", "tools"]
+}

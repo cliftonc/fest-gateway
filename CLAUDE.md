@@ -18,7 +18,12 @@ npm run cli -- <cmd>       # the fest CLI, e.g. `npm run cli -- whoami`
 npm run canary               # version gate — re-run before rolling out a new Claude Code release
 ```
 
-`npx fest <cmd>` and `npm link` also work — see the root `README.md`.
+Published to npm as `fest-gateway`, installing a `fest` binary. Publishing is
+the one flow that does not run the TypeScript directly: Node refuses to strip
+types under `node_modules`, so `npm run build:package` compiles `server/`,
+`shared/` and `cli/` to `dist/` (via `tsconfig.build.json`) and copies the
+migrations, the price snapshot and `web/dist` alongside. `prepack` runs both
+builds, so `npm publish` is enough — see the root `README.md`.
 
 Before committing: `npm test` and `npm run typecheck` both clean.
 

@@ -32,15 +32,19 @@ Or, if the operator has configured Google/GitHub OAuth (see below), a developer
 can skip all of that and self-serve a token from their own machine:
 
 ```bash
-npx fest login --server http://fest.corp:8787   # opens a browser, stores a token in ~/.fest
-npx fest claude                                  # runs `claude`, env set up for you
-npx fest whoami                                  # what's logged in, and whether it's still live
+npm install -g fest-gateway                 # the command it installs is `fest`
+
+fest login --server http://fest.corp:8787   # opens a browser, stores a token in ~/.fest
+fest claude                                  # runs `claude`, env set up for you
+fest whoami                                  # what's logged in, and whether it's still live
 ```
 
-`npx fest ...` works straight from a clone of this repo — no global install and
-nothing published to a registry. `npm run cli -- ...` (note the `--`) is the
-same thing via npm scripts, if that's the more natural habit; `npm link` once
-if you want a bare `fest` on your PATH instead.
+The package is `fest-gateway` — plain `fest` was already taken on npm — but the
+binary it installs is `fest`. Without installing anything, `npx fest-gateway
+login …` does the same job.
+
+From a clone of this repo the CLI runs straight off the TypeScript instead:
+`npm run cli -- login …` (note the `--`), or `node server/bin/fest.ts login …`.
 
 Or without Docker:
 

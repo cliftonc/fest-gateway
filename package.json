@@ -1,15 +1,40 @@
 {
-  "name": "fest",
-  "version": "0.0.1",
-  "private": true,
+  "name": "fest-gateway",
+  "version": "0.1.0",
   "type": "module",
   "description": "Self-hosted Claude Code gateway: per-user subscription pass-through, central token/cost monitoring, model routing.",
+  "license": "MIT",
+  "author": "Clifton Cunningham",
+  "homepage": "https://github.com/cliftonc/fest-gateway#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cliftonc/fest-gateway.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cliftonc/fest-gateway/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "gateway",
+    "proxy",
+    "llm",
+    "observability",
+    "self-hosted"
+  ],
   "engines": {
     "node": ">=22.18"
   },
   "bin": {
-    "fest": "./server/bin/fest.ts"
+    "fest": "./dist/server/bin/fest.js"
   },
+  "files": [
+    "dist",
+    "routes.example.json",
+    "LICENSE",
+    "README.md"
+  ],
   "dependencies": {
     "arctic": "^3.7.0",
     "open": "^11.0.0"
@@ -19,6 +44,8 @@
     "start": "node --env-file-if-exists=.env server/bin/fest.ts serve",
     "cli": "node --env-file-if-exists=.env server/bin/fest.ts",
     "build": "vite build",
+    "build:package": "node tools/build-package.mjs",
+    "prepack": "npm run build && npm run build:package",
     "capture": "node tools/capture-server.ts",
     "canary": "node tools/canary.ts",
     "prices:sync": "node tools/prices-sync.ts",
