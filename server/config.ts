@@ -39,6 +39,20 @@ export interface FestConfig {
    * which presents as "login succeeds, then immediately signs me out".
    */
   readonly secureCookies: boolean;
+  /** Base URL Fest is reachable at, used to build OAuth redirect URIs. */
+  readonly publicUrl: string;
+  readonly googleClientId: string | null;
+  readonly googleClientSecret: string | null;
+  readonly githubClientId: string | null;
+  readonly githubClientSecret: string | null;
+  /**
+   * Email domains allowed to self-mint a token or dashboard session via OAuth
+   * (lowercased, no leading `@`). Empty — the default — refuses every OAuth
+   * login rather than allowing every Google/GitHub account on the internet:
+   * self-service token minting spends server-held credentials on the
+   * substitute path, so "nobody configured this" must mean "off", not "open".
+   */
+  readonly allowedEmailDomains: readonly string[];
 }
 
 function intFromEnv(name: string, fallback: number): number {
@@ -60,6 +74,22 @@ function boolFromEnv(name: string, fallback: boolean): boolean {
   throw new Error(`${name} must be a boolean, got ${JSON.stringify(raw)}`);
 }
 
+function stringFromEnv(name: string): string | null {
+  const raw = process.env[name];
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function listFromEnv(name: string): readonly string[] {
+  const raw = process.env[name];
+  if (raw === undefined) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s !== "");
+}
+
 export function loadConfig(): FestConfig {
   const level = (process.env.FEST_LOG_LEVEL ?? "info").trim() as FestConfig["logLevel"];
   if (!["debug", "info", "warn", "error"].includes(level)) {
@@ -73,9 +103,12 @@ export function loadConfig(): FestConfig {
     throw new Error(`FEST_UPSTREAM_BASE_URL is not a valid URL: ${JSON.stringify(upstream)}`);
   }
 
+  const port = intFromEnv("FEST_PORT", 8787);
+  const host = (process.env.FEST_HOST ?? "127.0.0.1").trim();
+
   return {
-    port: intFromEnv("FEST_PORT", 8787),
-    host: (process.env.FEST_HOST ?? "127.0.0.1").trim(),
+    port,
+    host,
     upstreamBaseUrl: upstream.replace(/\/+$/, ""),
     usageLogPath: (process.env.FEST_USAGE_LOG ?? "./data/usage.jsonl").trim(),
     dbPath: (process.env.FEST_DB ?? "./data/fest.db").trim(),
@@ -83,10 +116,20 @@ export function loadConfig(): FestConfig {
     requireIdentity: boolFromEnv("FEST_REQUIRE_IDENTITY", false),
     routesPath: (process.env.FEST_ROUTES ?? "").trim() || null,
     secureCookies: boolFromEnv("FEST_SECURE_COOKIES", false),
+    publicUrl: (stringFromEnv("FEST_PUBLIC_URL") ?? `http://${host}:${port}`).replace(/\/+$/, ""),
+    googleClientId: stringFromEnv("FEST_GOOGLE_CLIENT_ID"),
+    googleClientSecret: stringFromEnv("FEST_GOOGLE_CLIENT_SECRET"),
+    githubClientId: stringFromEnv("FEST_GITHUB_CLIENT_ID"),
+    githubClientSecret: stringFromEnv("FEST_GITHUB_CLIENT_SECRET"),
+    allowedEmailDomains: listFromEnv("FEST_ALLOWED_EMAIL_DOMAINS"),
   };
 }
 
-/** Safe to log: contains no secrets by construction. */
+/** Safe to log: secrets are redacted, never spread through verbatim. */
 export function describeConfig(cfg: FestConfig): Record<string, unknown> {
-  return { ...cfg };
+  return {
+    ...cfg,
+    googleClientSecret: cfg.googleClientSecret === null ? null : "[redacted]",
+    githubClientSecret: cfg.githubClientSecret === null ? null : "[redacted]",
+  };
 }

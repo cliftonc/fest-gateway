@@ -217,6 +217,19 @@ label.check { display: inline-flex; gap: 6px; align-items: center; cursor: point
 }
 .login-foot { color: var(--muted); font-size: 11.5px; margin: 18px 0 0; line-height: 1.5; }
 
+.login-oauth { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+.login-oauth-button {
+  display: block;
+  text-align: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  text-decoration: none;
+}
+.login-oauth-button:hover { border-color: var(--accent); color: var(--accent); }
+.login-oauth .sub { text-align: center; margin: 4px 0 0; }
+
 .whoami { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .whoami span { overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .whoami button { padding: 3px 8px; font-size: 12px; }

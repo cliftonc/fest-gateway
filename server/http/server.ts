@@ -117,6 +117,7 @@ export function createServer(deps: ServerDeps): Server {
               store: deps.store,
               orgId: deps.orgId,
               secureCookies: deps.config.secureCookies,
+              config: deps.config,
             }, decision.allow ? decision.session : null)
           ) {
             return;

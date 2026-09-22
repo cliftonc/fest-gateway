@@ -7,9 +7,17 @@
   "engines": {
     "node": ">=22.18"
   },
+  "bin": {
+    "fest": "./server/bin/fest.ts"
+  },
+  "dependencies": {
+    "arctic": "^3.7.0",
+    "open": "^11.0.0"
+  },
   "scripts": {
     "dev": "node tools/dev.mjs",
-    "start": "node --env-file-if-exists=.env server/bin/fest.ts",
+    "start": "node --env-file-if-exists=.env server/bin/fest.ts serve",
+    "cli": "node --env-file-if-exists=.env server/bin/fest.ts",
     "build": "vite build",
     "capture": "node tools/capture-server.ts",
     "canary": "node tools/canary.ts",

@@ -64,6 +64,7 @@ export function App(): React.JSX.Element {
     return (
       <LoginPage
         setupRequired={me.data.setupRequired}
+        oauthProviders={me.data.oauthProviders}
         onSignedIn={() => void queryClient.invalidateQueries()}
       />
     );

@@ -19,11 +19,21 @@ export type Role = "owner" | "admin" | "member";
 /** Normalised so `Ada@Corp.test` and `ada@corp.test` are the same account. */
 export const normaliseEmail = (email: string): string => email.trim().toLowerCase();
 
+/**
+ * Is this deployment claimed?
+ *
+ * Deliberately not "has a password": an owner claimed via OAuth (see
+ * `server/api/oauth.ts`) never gets a `password_hash` at all, and the whole
+ * point of that self-service path is to satisfy this same check — so tying it
+ * to password auth specifically would leave Fest refusing to bind on any
+ * non-loopback interface even after someone had legitimately claimed it.
+ * Ownership is a role, not an auth method.
+ */
 export function hasAnyOwner(store: Store, orgId: string): boolean {
   const row = store.db
     .prepare(
       `SELECT 1 AS present FROM users
-        WHERE org_id = ? AND role = 'owner' AND password_hash IS NOT NULL AND disabled_at IS NULL
+        WHERE org_id = ? AND role = 'owner' AND disabled_at IS NULL
         LIMIT 1`,
     )
     .get(orgId) as { present?: number } | undefined;

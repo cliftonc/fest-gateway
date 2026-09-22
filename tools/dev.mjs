@@ -10,7 +10,17 @@
  *   2. `vite` — the dashboard on 5173, proxying `/api` to the gateway, with
  *      hot module replacement.
  *
- * Open **http://localhost:5173**. Point Claude Code at **8787**. Two ports
+ * Open **http://127.0.0.1:5173** — not `localhost:5173`: cookies are scoped by
+ * hostname, not resolved address, so `localhost` and `127.0.0.1` are different
+ * cookie domains even on the same machine. OAuth's state cookie is set while
+ * browsing through the Vite proxy, then presented again when the provider
+ * redirects straight back to the gateway's own `127.0.0.1:8787` — if those two
+ * legs disagree on hostname, that cookie never arrives and sign-in fails with
+ * "invalid or expired sign-in attempt" on the first attempt (and then
+ * "succeeds" on a retry launched from the gateway's own origin, which is
+ * consistent — the inconsistency was the bug).
+ *
+ * Point Claude Code at **8787**. Two ports
  * rather than one because HMR needs Vite to own the page: the gateway also
  * serves the dashboard, but only the built bundle, which is what `npm start`
  * is for.
@@ -38,6 +48,7 @@ const targets = [
       "--watch-preserve-output",
       "--env-file-if-exists=.env",
       "server/bin/fest.ts",
+      "serve",
     ],
   },
   {
@@ -114,7 +125,7 @@ process.stdout.write(
     "",
     "  fest dev",
     "  ─────────────────────────────────────────────────────────",
-    `  dashboard   http://localhost:5173        <- open this`,
+    `  dashboard   http://127.0.0.1:5173        <- open this (not localhost:5173 — see OAuth note above)`,
     `  gateway     http://127.0.0.1:${process.env.FEST_PORT ?? 8787}`,
     "",
     `  point Claude Code at the GATEWAY, not the dashboard:`,

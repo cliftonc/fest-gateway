@@ -28,6 +28,20 @@ env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
   ANTHROPIC_BASE_URL=http://fest.corp:8787/t/<token> claude
 ```
 
+Or, if the operator has configured Google/GitHub OAuth (see below), a developer
+can skip all of that and self-serve a token from their own machine:
+
+```bash
+npx fest login --server http://fest.corp:8787   # opens a browser, stores a token in ~/.fest
+npx fest claude                                  # runs `claude`, env set up for you
+npx fest whoami                                  # what's logged in, and whether it's still live
+```
+
+`npx fest ...` works straight from a clone of this repo — no global install and
+nothing published to a registry. `npm run cli -- ...` (note the `--`) is the
+same thing via npm scripts, if that's the more natural habit; `npm link` once
+if you want a bare `fest` on your PATH instead.
+
 Or without Docker:
 
 ```bash
@@ -89,16 +103,24 @@ supported product.
 ## Layout
 
 ```
-server/bin/fest.ts        CLI: serve | migrate | token create/list/revoke
-server/pipeline/          passthrough (byte-for-byte) — the subscription path
-server/http/              sse parser, tee, header discipline, errors, routing
-server/store/             SQLite schema, write path, identity tokens
-server/usage/             accumulator, lean pricing, nullable cost algebra
-server/secret/            credential classification + redaction
-shared/types.ts           the contracts both halves agree on
-tools/capture-server.ts   Phase 0 diagnostic (throwaway)
-docs/PHASE0.md            the gating experiment runbook
-test/                     node --test
+server/bin/fest.ts       CLI: serve | migrate | token | admin | seed |
+                              login | whoami | claude | logout
+server/pipeline/         passthrough (byte-for-byte) — the subscription path
+server/http/             sse parser, tee, header discipline, errors, routing
+server/store/            SQLite schema, write path, identity tokens
+server/usage/            accumulator, lean pricing, nullable cost algebra
+server/secret/           credential classification + redaction
+server/auth/oauth.ts     Google/GitHub provider construction
+server/api/oauth.ts      /api/auth/oauth/* and /api/auth/identity
+cli/                     the developer half of the CLI — no DB access, ever.
+                         login (loopback OAuth flow) | whoami | claude | logout,
+                         and the ~/.fest config they share
+shared/types.ts          the contracts both halves agree on
+shared/demotion-vars.ts  env vars that silently kill subscription auth
+tools/capture-server.ts  Phase 0 diagnostic (throwaway)
+docs/PHASE0.md           the gating experiment runbook
+docs/CLI-AUTH.md         OAuth setup and the fest login/whoami/claude flow
+test/                    node --test
 ```
 
 ## Accounting rules that are easy to get wrong
@@ -177,6 +199,13 @@ the server only ever sees plain HTTP and cannot detect this for itself.
 | `FEST_SECURE_COOKIES` | set behind HTTPS. |
 | `FEST_ROUTES` | routing table path. Absent means everything passes through. |
 | `FEST_UPSTREAM_BASE_URL`, `FEST_LOG_LEVEL` | |
+| `FEST_GOOGLE_CLIENT_ID`, `FEST_GOOGLE_CLIENT_SECRET` | Google OAuth, for `fest login` and the dashboard. Absent means Google sign-in is off. |
+| `FEST_GITHUB_CLIENT_ID`, `FEST_GITHUB_CLIENT_SECRET` | GitHub OAuth, same idea. |
+| `FEST_ALLOWED_EMAIL_DOMAINS` | comma-separated. **Required to enable OAuth at all** — empty refuses every OAuth login rather than allowing any Google/GitHub account. |
+| `FEST_PUBLIC_URL` | base URL Fest is reachable at, for building the OAuth redirect URI. Defaults to `http://<host>:<port>`. |
+
+See [docs/CLI-AUTH.md](docs/CLI-AUTH.md) for the full OAuth setup and how
+`fest login`'s loopback flow works.
 
 ## Requirements
 

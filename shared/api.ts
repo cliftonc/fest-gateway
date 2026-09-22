@@ -249,6 +249,8 @@ export interface MeResponse {
    * loopback.
    */
   readonly setupRequired: boolean;
+  /** Which OAuth providers this deployment has configured — "Continue with X" buttons for these only. */
+  readonly oauthProviders: readonly ("google" | "github")[];
 }
 
 /** One administrative action. Never contains a credential or any prompt text. */

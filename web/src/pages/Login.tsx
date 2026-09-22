@@ -11,17 +11,25 @@
 import { useState } from "react";
 import { login } from "../lib/auth.ts";
 
+const PROVIDER_LABEL: Record<string, string> = { google: "Google", github: "GitHub" };
+
 export function LoginPage({
   setupRequired,
+  oauthProviders,
   onSignedIn,
 }: {
   setupRequired: boolean;
+  oauthProviders: readonly ("google" | "github")[];
   onSignedIn: () => void;
 }): React.JSX.Element {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The OAuth callback redirects here with `?auth_error=` on failure — this is
+  // a full page navigation, so there is no in-memory state to carry it.
+  const authError = new URLSearchParams(window.location.search).get("auth_error");
 
   async function submit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -45,12 +53,34 @@ export function LoginPage({
           <small>self-hosted Claude Code gateway</small>
         </div>
 
+        {authError !== null && (
+          <p className="state bad" role="alert">
+            {authError}
+          </p>
+        )}
+
+        {setupRequired && (
+          <p className="sub">
+            Nobody has claimed this deployment yet, so it is running open on loopback.
+            {oauthProviders.length > 0
+              ? " Sign in below to become its owner, or create an account from the host:"
+              : " Create an owner account on the host:"}
+          </p>
+        )}
+
+        {oauthProviders.length > 0 && (
+          <div className="login-oauth">
+            {oauthProviders.map((p) => (
+              <a key={p} className="login-oauth-button" href={`/api/auth/oauth/${p}/start`}>
+                Continue with {PROVIDER_LABEL[p] ?? p}
+              </a>
+            ))}
+            {!setupRequired && <p className="sub">or sign in with a password</p>}
+          </div>
+        )}
+
         {setupRequired ? (
           <>
-            <p className="sub">
-              Nobody has claimed this deployment yet, so it is running open on loopback. Create an
-              owner account on the host:
-            </p>
             <pre className="login-cmd">fest admin create you@corp.test</pre>
             <p className="sub">
               The password is printed once. Until then Fest will refuse to listen on any interface

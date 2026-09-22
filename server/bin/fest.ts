@@ -2,6 +2,7 @@
 /**
  * Fest CLI.
  *
+ * Server operator commands (need FEST_* server env, run on the host):
  *   fest serve                        run the gateway
  *   fest migrate                      apply schema migrations
  *   fest token create <email> [name]  mint an identity token (shown once)
@@ -17,6 +18,13 @@
  *                                     dashboard without a live session
  *   fest seed --reset                 discard the database, then seed it fresh
  *   fest seed --clear                 discard the database and stop
+ *
+ * Developer commands (run on your own machine, no server env needed):
+ *   fest login [--provider google|github] [--server <url>]
+ *                                     sign in via OAuth, store a token in ~/.fest
+ *   fest whoami                       show the locally stored login
+ *   fest claude [-- claude args...]   run `claude` pointed at your Fest gateway
+ *   fest logout                       forget the local login
  */
 
 import { mkdir, rm } from "node:fs/promises";
@@ -43,6 +51,11 @@ import { parseRouteTable, EMPTY_ROUTE_TABLE } from "../routes/table.ts";
 import { watchRoutes } from "../routes/watch.ts";
 import type { RouteTable } from "../routes/table.ts";
 import { readFile } from "node:fs/promises";
+import { runLogin } from "../../cli/login.ts";
+import { runWhoami } from "../../cli/whoami.ts";
+import { runClaude } from "../../cli/claude.ts";
+import { runLogout } from "../../cli/logout.ts";
+import { readCliConfig } from "../../cli/config.ts";
 
 const out = (s: string): void => void process.stdout.write(s + "\n");
 
@@ -291,6 +304,19 @@ function flagValue(argv: readonly string[], name: string): string | undefined {
   return i === -1 ? undefined : argv[i + 1];
 }
 
+/**
+ * Did this user already have console access — a password of their own —
+ * before this call? `ensureUser` also runs for metering-only rows (an
+ * identity token, or an OAuth self-service login that never went through
+ * `admin create`), so "a row exists" is not the same question.
+ */
+function hadConsoleAccess(store: Store, userId: string): boolean {
+  const row = store.db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(userId) as
+    | { password_hash: string | null }
+    | undefined;
+  return row !== undefined && row.password_hash !== null;
+}
+
 async function cmdAdmin(cfg: FestConfig, argv: readonly string[]): Promise<void> {
   const store = await withStore(cfg);
   const org = ensureOrg(store);
@@ -315,12 +341,19 @@ async function cmdAdmin(cfg: FestConfig, argv: readonly string[]): Promise<void>
        * routine password rotation therefore turned the dashboard's auth off.
        * Changing a password must change exactly the password.
        *
-       * Only when the user is new does the default apply, and then the FIRST
-       * account is the owner whatever it asked for: a deployment with only an
-       * `admin` has nobody able to grant the owner role afterwards.
+       * Only when the user is new to the CONSOLE does the default apply, and
+       * then the FIRST such account is the owner whatever it asked for: a
+       * deployment with only an `admin` has nobody able to grant the owner
+       * role afterwards. A metering-only row (minted by `fest token create`,
+       * or by an OAuth `fest login` that never touched the console) does not
+       * count as "existing" for this purpose — granting it console access for
+       * the first time is exactly the bootstrap case, not a rotation to
+       * protect.
        */
       const existing = findUserByEmail(store, org.id, normaliseEmail(email));
-      const role = (roleFlag ?? existing?.role ?? (hasAnyOwner(store, org.id) ? "admin" : "owner")) as
+      const existingConsoleRole =
+        existing !== null && hadConsoleAccess(store, existing.id) ? existing.role : undefined;
+      const role = (roleFlag ?? existingConsoleRole ?? (hasAnyOwner(store, org.id) ? "admin" : "owner")) as
         | "owner"
         | "admin"
         | "member";
@@ -488,9 +521,76 @@ async function cmdSeed(cfg: FestConfig, argv: readonly string[]): Promise<void> 
   out("number in this database.");
 }
 
+function printHelp(): void {
+  out(
+    "server operator:\n" +
+      "  fest serve | migrate |\n" +
+      "       seed [--requests N] [--hours N] [--reset | --clear] [--force] |\n" +
+      "       token create <email> [name] | token list | token revoke <id> |\n" +
+      "       admin create <email> [--role R] [--password-stdin] | admin list |\n" +
+      "       admin passwd <email> | admin disable <email> | admin enable <email>\n" +
+      "\n" +
+      "developer (run on your own machine, no server env needed):\n" +
+      "  fest login [--provider google|github] [--server <url>]\n" +
+      "  fest whoami\n" +
+      "  fest claude [-- claude args...]\n" +
+      "  fest logout",
+  );
+}
+
+async function cmdLogin(argv: readonly string[]): Promise<void> {
+  const providerFlag = flagValue(argv, "provider") ?? "google";
+  if (providerFlag !== "google" && providerFlag !== "github") {
+    throw new Error("--provider must be google or github");
+  }
+  const serverFlag = flagValue(argv, "server");
+  const serverUrl = serverFlag ?? (await readCliConfig())?.serverUrl;
+  if (serverUrl === undefined) {
+    throw new Error(
+      "usage: fest login --server <url> [--provider google|github]\n(--server is required the first time)",
+    );
+  }
+  await runLogin({ provider: providerFlag, serverUrl });
+}
+
+/**
+ * Commands a developer runs on their own machine. Dispatched before
+ * `loadConfig()` is ever called: a laptop has no reason to have any FEST_*
+ * server env var set, and these commands must not imply otherwise.
+ */
+const CLIENT_COMMANDS = new Set(["login", "whoami", "claude", "logout"]);
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const cmd = argv[0] ?? "serve";
+  const cmd = argv[0] ?? "help";
+
+  if (CLIENT_COMMANDS.has(cmd)) {
+    switch (cmd) {
+      case "login":
+        await cmdLogin(argv.slice(1));
+        return;
+      case "whoami":
+        await runWhoami();
+        return;
+      case "claude": {
+        // `fest claude -- --resume` and `fest claude --resume` are both fine:
+        // this subcommand defines no flags of its own, so a leading `--` is
+        // only ever there by convention and is stripped rather than forwarded.
+        const claudeArgs = argv.slice(1);
+        await runClaude(claudeArgs[0] === "--" ? claudeArgs.slice(1) : claudeArgs);
+        return;
+      }
+      case "logout":
+        await runLogout();
+        return;
+    }
+  }
+
+  if (cmd === "help" || cmd === "--help" || cmd === "-h") {
+    printHelp();
+    return;
+  }
+
   const cfg = loadConfig();
   setLogLevel(cfg.logLevel);
 
@@ -514,17 +614,6 @@ async function main(): Promise<void> {
       return;
     case "seed":
       await cmdSeed(cfg, argv.slice(1));
-      return;
-    case "help":
-    case "--help":
-    case "-h":
-      out(
-        "fest serve | migrate |\n" +
-          "     seed [--requests N] [--hours N] [--reset | --clear] [--force] |\n" +
-          "     token create <email> [name] | token list | token revoke <id> |\n" +
-          "     admin create <email> [--role R] [--password-stdin] | admin list |\n" +
-          "     admin passwd <email> | admin disable <email> | admin enable <email>",
-      );
       return;
     default:
       throw new Error(`unknown command: ${cmd}`);

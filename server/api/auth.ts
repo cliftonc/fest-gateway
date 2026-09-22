@@ -21,6 +21,9 @@ import { originAllowed, clientIp, sessionFromRequest } from "../auth/guard.ts";
 import { recordAudit } from "../store/audit.ts";
 import { log } from "../log.ts";
 import type { MeResponse } from "../../shared/api.ts";
+import type { FestConfig } from "../config.ts";
+import { handleOauth } from "./oauth.ts";
+import { configuredProviders } from "../auth/oauth.ts";
 
 const MAX_BODY_BYTES = 4 * 1024;
 
@@ -28,6 +31,7 @@ export interface AuthDeps {
   readonly store: Store;
   readonly orgId: string;
   readonly secureCookies: boolean;
+  readonly config: FestConfig;
 }
 
 function json(res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}): void {
@@ -107,6 +111,14 @@ export async function handleAuth(
   if (!path.startsWith("/api/auth/")) return false;
   const method = req.method ?? "GET";
 
+  // OAuth is a redirect-driven, GET-only surface, and Bearer/X-Fest-Token
+  // authenticated on /api/auth/identity — neither fits the POST + Origin +
+  // cookie-session shape the rest of this file enforces, so it's handled
+  // entirely separately.
+  if (await handleOauth(req, res, path, { store: deps.store, orgId: deps.orgId, config: deps.config })) {
+    return true;
+  }
+
   if (path === "/api/auth/me" && method === "GET") {
     json(res, 200, {
       // Not 401: "am I signed in" is a question an anonymous caller is allowed
@@ -119,6 +131,7 @@ export async function handleAuth(
       // The dashboard shows a setup banner rather than a login form when
       // nobody has claimed this deployment yet.
       setupRequired: !hasAnyOwner(deps.store, deps.orgId),
+      oauthProviders: configuredProviders(deps.config),
     } satisfies MeResponse);
     return true;
   }
@@ -235,6 +248,7 @@ async function handleLogin(req: IncomingMessage, res: ServerResponse, deps: Auth
       authenticated: true,
       user: { id: outcome.user.id, email: outcome.user.email, role: outcome.user.role },
       setupRequired: false,
+      oauthProviders: configuredProviders(deps.config),
     } satisfies MeResponse,
     {
       "set-cookie": serializeCookie(created.raw, {

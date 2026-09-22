@@ -40,6 +40,7 @@ import { once } from "node:events";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { DEMOTION_VARS } from "../shared/demotion-vars.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -94,14 +95,6 @@ class Inconclusive extends Error {}
 // off its subscription — a red result caused by local config, misread as a
 // broken release, is worse than no canary at all.
 // ---------------------------------------------------------------------------
-
-const DEMOTION_VARS = [
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_AUTH_TOKEN",
-  "ANTHROPIC_BASE_URL",
-  "CLAUDE_CODE_USE_BEDROCK",
-  "CLAUDE_CODE_USE_VERTEX",
-];
 
 function settingsFiles(): string[] {
   return [
