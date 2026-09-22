@@ -44,3 +44,19 @@ export function emailDomainAllowed(cfg: FestConfig, email: string): boolean {
   const domain = email.split("@")[1]?.toLowerCase() ?? "";
   return cfg.allowedEmailDomains.includes(domain);
 }
+
+/**
+ * Where a freshly minted identity token may be delivered.
+ *
+ * Only ever a loopback URL, because this value comes in on a query string and
+ * decides where a live credential is sent. `fest login` runs a throwaway server
+ * on 127.0.0.1 to catch it; anything else is someone else's machine.
+ */
+export function isLoopbackRedirect(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost");
+  } catch {
+    return false;
+  }
+}

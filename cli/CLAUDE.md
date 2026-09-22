@@ -6,10 +6,13 @@ Dispatched from `server/bin/fest.ts`'s `CLIENT_COMMANDS` set, before
 
 - `config.ts` — read/write/clear `~/.fest/config.json` (mode 0600, dir 0700).
   `FEST_TOKEN`/`FEST_SERVER_URL` env vars override the file, for CI.
-- `login.ts` — the loopback OAuth flow: a temp HTTP server on `127.0.0.1`,
-  a browser opened at `{server}/api/auth/oauth/{provider}/start`, waits for
-  the callback with a minted token. Checks `GET {server}/healthz` first —
-  see the comment on `checkIsGateway` before touching that.
+- `login.ts` — the loopback flow: a temp HTTP server on `127.0.0.1`, a browser
+  opened at `{server}/api/auth/cli/authorize`, waits for the callback with a
+  minted token. It opens the *gateway's* authorise route, not a provider's
+  `/start`, because only the server can see whether that browser already has a
+  session — already signed in means one approval click instead of a Google
+  round trip. Checks `GET {server}/healthz` first — see the comment on
+  `checkIsGateway` before touching that.
 - `whoami.ts` — local config + a live check against `/api/auth/identity`.
 - `claude.ts` — spawns the real `claude` binary in one of two postures,
   auto-detected from `~/.claude.json` and forceable with `fest claude gw`.

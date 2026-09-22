@@ -56,6 +56,19 @@ export interface FestConfig {
    * not that proxy strips the prefix itself.
    */
   readonly basePath: string;
+  /**
+   * Where the dashboard actually is, when that is not this server's own root.
+   *
+   * Only `fest login` uses it: an unauthenticated CLI authorisation is sent to
+   * the dashboard's sign-in screen, and in production that is this server. Under
+   * `npm run dev` it is not — Vite owns the page on 5173 so it can do HMR, while
+   * the gateway on 8787 serves at best a stale built bundle. `tools/dev.mjs`
+   * sets this so the redirect lands somewhere that can actually render a login.
+   *
+   * Null in production, and it should stay that way: pointing it off-origin
+   * costs the session cookie, which is scoped by hostname.
+   */
+  readonly dashboardUrl: string | null;
   readonly googleClientId: string | null;
   readonly googleClientSecret: string | null;
   readonly githubClientId: string | null;
@@ -159,6 +172,7 @@ export function loadConfig(): FestConfig {
     secureCookies: boolFromEnv("FEST_SECURE_COOKIES", false),
     publicUrl,
     basePath: basePathFrom(stringFromEnv("FEST_BASE_PATH"), publicUrl),
+    dashboardUrl: stringFromEnv("FEST_DASHBOARD_URL")?.replace(/\/+$/, "") ?? null,
     googleClientId: stringFromEnv("FEST_GOOGLE_CLIENT_ID"),
     googleClientSecret: stringFromEnv("FEST_GOOGLE_CLIENT_SECRET"),
     githubClientId: stringFromEnv("FEST_GITHUB_CLIENT_ID"),

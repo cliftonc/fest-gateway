@@ -34,6 +34,7 @@ import { ErrorsPage } from "./pages/Errors.tsx";
 import { AdminPage } from "./pages/Admin.tsx";
 import { LoginPage } from "./pages/Login.tsx";
 import { fetchMe, logout } from "./lib/auth.ts";
+import { useCliAuthorizeHandoff } from "./lib/cli-authorize.ts";
 import { SetupCliPanel, SetupCliToggle, useSetupCli } from "./components/SetupCli.tsx";
 
 export function App(): React.JSX.Element {
@@ -57,6 +58,10 @@ export function App(): React.JSX.Element {
     window.addEventListener("fest:unauthenticated", onUnauthenticated);
     return () => window.removeEventListener("fest:unauthenticated", onUnauthenticated);
   }, [queryClient]);
+
+  // `fest login` parked a callback here before showing the login screen; now
+  // that there is a session, hand back to the gateway's approval page.
+  useCliAuthorizeHandoff(me.data?.authenticated === true);
 
   if (me.isPending) return <div className="p-6 text-muted-foreground">Loading…</div>;
 

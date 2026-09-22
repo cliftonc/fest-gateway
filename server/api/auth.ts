@@ -23,6 +23,7 @@ import { log } from "../log.ts";
 import type { MeResponse } from "../../shared/api.ts";
 import type { FestConfig } from "../config.ts";
 import { handleOauth } from "./oauth.ts";
+import { handleCliAuth } from "./cli-auth.ts";
 import { configuredProviders } from "../auth/oauth.ts";
 
 const MAX_BODY_BYTES = 4 * 1024;
@@ -116,6 +117,20 @@ export async function handleAuth(
   // cookie-session shape the rest of this file enforces, so it's handled
   // entirely separately.
   if (await handleOauth(req, res, path, { store: deps.store, orgId: deps.orgId, config: deps.config })) {
+    return true;
+  }
+
+  // Before the method and origin gates below: `authorize` is a GET that renders
+  // a page, and `approve` applies both checks itself for its own reasons.
+  if (
+    await handleCliAuth(
+      req,
+      res,
+      path,
+      { store: deps.store, orgId: deps.orgId, config: deps.config },
+      session,
+    )
+  ) {
     return true;
   }
 

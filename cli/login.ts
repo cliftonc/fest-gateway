@@ -123,9 +123,15 @@ export async function runLogin(opts: {
 
   try {
     const callbackUrl = `http://127.0.0.1:${port}/callback`;
-    const startUrl = `${serverUrl}/api/auth/oauth/${opts.provider}/start?cli_redirect_uri=${encodeURIComponent(callbackUrl)}`;
+    // Not the provider's start URL directly. This asks the GATEWAY first, which
+    // can see the browser's session cookie where this process cannot: already
+    // signed in means one approval click instead of a provider round trip, and
+    // if there is no session it hands off to the dashboard's own login screen —
+    // which is why `--provider` is not passed here. It still records which
+    // provider was asked for in the stored config.
+    const startUrl = `${serverUrl}/api/auth/cli/authorize?cli_redirect_uri=${encodeURIComponent(callbackUrl)}`;
 
-    process.stdout.write(`Opening your browser to sign in with ${opts.provider}...\n`);
+    process.stdout.write("Opening your browser to authorise this CLI...\n");
     process.stdout.write(`If it doesn't open, visit:\n  ${startUrl}\n`);
     (opts.openBrowser ?? open)(startUrl).catch(() => {});
 

@@ -35,6 +35,12 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   token on the proxy path (`/v1/*`) and must never require a browser session.
   `gateway-401.ts` builds the user-facing error text shown to Claude Code
   itself.
+- **`api/cli-auth.ts`** — `fest login`'s authorise + approve pair, and the only
+  server-rendered HTML in the codebase. It mints an identity token from a
+  dashboard session, so the approval POST's origin check and the loopback-only
+  check on `cli_redirect_uri` are load-bearing, not ceremony. The page must
+  never declare a `no-referrer` policy: browsers null `Origin` on form
+  submissions under it, and the origin check then refuses its own button.
 - **`api/`** — the dashboard's JSON API. `routes.ts` is the read surface
   (asserts every response `satisfies` `shared/api.ts`); `auth.ts` is
   password sign-in/out/`me`; `oauth.ts` is Google/GitHub sign-in for both

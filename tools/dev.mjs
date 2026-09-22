@@ -98,10 +98,25 @@ function shutdown(reason, code = 0) {
   }
 }
 
+/**
+ * Two ports is a dev-only fact the gateway would otherwise get wrong.
+ *
+ * `fest login` sends an unauthenticated browser to the dashboard's sign-in
+ * screen. In production that is the gateway itself; here it is Vite, and the
+ * gateway serves at best a stale bundle. Telling the gateway where the
+ * dashboard really is keeps that redirect landing somewhere that can render a
+ * login — and on 127.0.0.1 rather than localhost, for the cookie-domain reason
+ * in the header comment.
+ */
+const gatewayEnv = {
+  ...process.env,
+  FEST_DASHBOARD_URL: process.env.FEST_DASHBOARD_URL ?? "http://127.0.0.1:5173",
+};
+
 for (const target of targets) {
   const child = spawn(target.command, target.args, {
     stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
+    env: target.name === "gateway" ? gatewayEnv : process.env,
   });
   pipe(child.stdout, target.name, target.colour, process.stdout);
   pipe(child.stderr, target.name, target.colour, process.stderr);

@@ -70,19 +70,41 @@ look like a Fest gateway," this is almost certainly why.
 1. `fest login --server https://fest.corp.test [--provider google|github]`
    starts a temporary HTTP server on `127.0.0.1` (a small port range,
    `8865`-`8875`) and opens your browser at
-   `{server}/api/auth/oauth/{provider}/start?cli_redirect_uri=http://127.0.0.1:<port>/callback`.
-2. The server runs normal OAuth against Google/GitHub (via
+   `{server}/api/auth/cli/authorize?cli_redirect_uri=http://127.0.0.1:<port>/callback`.
+2. **If that browser already has a Fest session**, the gateway shows an
+   approval page naming the account and the loopback address the token will be
+   delivered to. One click and you are done — no provider round trip, because
+   you have already proved who you are to this gateway. The CLI cannot know
+   this in advance (it has no access to browser cookies); the gateway can,
+   because the browser sends the session cookie with that request.
+
+   The click is not decoration. Minting a token from nothing but an ambient
+   cookie, on a GET, would let any page navigate a signed-in developer to that
+   URL and — with something listening on their loopback — take a live token in
+   silence. `approve` is a POST and is origin-checked, so it cannot be forged.
+
+   For the same reason the page must never set a `no-referrer` policy:
+   browsers null the `Origin` header on form submissions under it, and the
+   origin check then refuses the page's own button.
+3. **If there is no session**, the gateway redirects to the dashboard's own
+   login screen with `?cli_authorize=<callback>`. It parks that in
+   `sessionStorage` (the query string does not survive an OAuth round trip)
+   and, once signed in, hands back to `authorize` for the approval step.
+   Under `npm run dev` the dashboard is Vite on another port, so
+   `FEST_DASHBOARD_URL` tells the gateway where to send it; `tools/dev.mjs`
+   sets that for you.
+4. Signing in from that screen runs normal OAuth against Google/GitHub (via
    [arctic](https://www.npmjs.com/package/arctic)), with `state` (and, for
    Google, a PKCE `code_verifier`) held in short-lived cookies — never a
    database row.
-3. On success, the server checks `FEST_ALLOWED_EMAIL_DOMAINS`, finds-or-creates
+5. On success, the server checks `FEST_ALLOWED_EMAIL_DOMAINS`, finds-or-creates
    a `users` row for the verified email (`ensureUser`, the same idempotent
    lookup `fest token create` uses), mints a fresh identity token
    (`createToken` — same function, no admin-only gate on it), and redirects
    the browser to your loopback server with `?token=...&email=...`.
-4. Your CLI's temporary server captures it, shows a static "you can close this
+6. Your CLI's temporary server captures it, shows a static "you can close this
    window" page, and shuts itself down.
-5. The token is written to `~/.fest/config.json` (mode `0600`, inside
+7. The token is written to `~/.fest/config.json` (mode `0600`, inside
    `~/.fest/`, mode `0700`) — never echoed to the terminal, since it's already
    on disk.
 

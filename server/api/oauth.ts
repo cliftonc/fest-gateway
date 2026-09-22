@@ -24,7 +24,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { generateState, generateCodeVerifier } from "arctic";
 import type { Store } from "../store/db.ts";
 import type { FestConfig } from "../config.ts";
-import { googleProvider, githubProvider, emailDomainAllowed } from "../auth/oauth.ts";
+import { googleProvider, githubProvider, emailDomainAllowed, isLoopbackRedirect } from "../auth/oauth.ts";
 import type { OauthProvider } from "../auth/oauth.ts";
 import { ensureUser } from "../store/bootstrap.ts";
 import { normaliseEmail, hasAnyOwner } from "../auth/accounts.ts";
@@ -85,16 +85,6 @@ function clearOauthCookie(name: string, cfg: FestConfig): string {
   ];
   if (cfg.secureCookies) parts.push("Secure");
   return parts.join("; ");
-}
-
-/** Only ever a loopback URL: this cookie controls where a live identity token gets redirected. */
-function isLoopbackRedirect(raw: string): boolean {
-  try {
-    const u = new URL(raw);
-    return u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost");
-  } catch {
-    return false;
-  }
 }
 
 async function fetchGoogleEmail(accessToken: string): Promise<string> {

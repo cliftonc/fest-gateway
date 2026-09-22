@@ -44,6 +44,10 @@ test("captures a successful callback, writes the config, and never prints the ra
 
   // The loopback server is listening by the time openBrowser is invoked.
   await waitFor(() => capturedUrl !== "");
+  // The gateway's own authorisation entry point, NOT the provider's start URL.
+  // That is what lets an already-signed-in browser approve in one click instead
+  // of taking a Google round trip the developer did not need.
+  assert.equal(new URL(capturedUrl).pathname, "/api/auth/cli/authorize");
   const callbackUrl = new URL(capturedUrl).searchParams.get("cli_redirect_uri")!;
   assert.match(callbackUrl, /^http:\/\/127\.0\.0\.1:\d+\/callback$/);
 

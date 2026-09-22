@@ -213,6 +213,7 @@ the server only ever sees plain HTTP and cannot detect this for itself.
 | `FEST_ALLOWED_EMAIL_DOMAINS` | comma-separated. **Required to enable OAuth at all** — empty refuses every OAuth login rather than allowing any Google/GitHub account. |
 | `FEST_PUBLIC_URL` | base URL Fest is reachable at, for building the OAuth redirect URI. Defaults to `http://<host>:<port>`. |
 | `FEST_BASE_PATH` | mount path, if Fest is not at the root of its origin. Defaults to the path of `FEST_PUBLIC_URL`, so setting that is usually enough. |
+| `FEST_DASHBOARD_URL` | **dev only.** Where the dashboard is, when it isn't this server — `npm run dev` puts it on Vite's port. `fest login` sends an unauthenticated browser there to sign in. Leave unset in production. |
 
 See [docs/CLI-AUTH.md](docs/CLI-AUTH.md) for the full OAuth setup and how
 `fest login`'s loopback flow works.
