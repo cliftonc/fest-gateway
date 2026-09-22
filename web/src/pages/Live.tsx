@@ -313,7 +313,7 @@ export function LivePage(): React.JSX.Element {
           measure={measure}
         />
         <RollupBoard
-          title="Top developers"
+          title="By user"
           entries={byUser}
           emptyText="No traffic in this window yet."
           measure={measure}
