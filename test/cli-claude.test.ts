@@ -25,6 +25,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEMOTION_VARS } from "../shared/demotion-vars.ts";
+import { BASE_MODELS } from "../shared/base-models.ts";
 
 const fakeHome = mkdtempSync(join(tmpdir(), "fest-claudehome-"));
 const fakeCwd = mkdtempSync(join(tmpdir(), "fest-claudecwd-"));
@@ -231,7 +232,12 @@ test("an unknown intended model warns about exactly the unrouted base models", (
 });
 
 test("a menu covering every base model warns about nothing", () => {
-  assert.equal(checkServable([...MENU, "claude-opus-5", "claude-haiku-4-5-20251001"], null).kind, "ok");
+  // Derived from BASE_MODELS rather than written out: this test means "every
+  // base model is servable", and a hand-listed menu quietly stops meaning that
+  // the moment Anthropic ships one — which is exactly how it broke when Fable
+  // 5.1 was added to the list.
+  const everything = [...MENU, ...BASE_MODELS.map((m) => m.id)];
+  assert.equal(checkServable(everything, null).kind, "ok");
 });
 
 // ---------------------------------------------------------------------------

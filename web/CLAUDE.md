@@ -7,8 +7,10 @@ step — the server has none.
 - `src/pages/` — one file per screen (Live, Routing, Stats, Users, Models,
   Errors, Admin, Login). Nav order is landing order: Live first, because "what
   is going through this thing right now" is the question someone opens a
-  gateway dashboard with; Routing second, because "whose credential paid for
-  it" is the compliance question Fest exists to answer.
+  gateway dashboard with; Routing second, because it is pure config — what Fest
+  *will* substitute and what it adds — which must be checkable before traffic
+  proves it. Everything about traffic that already happened, including whose
+  credential paid and each developer's rate-limit headroom, is on Stats.
 - `src/components/ui/` — shadcn components, added with
   `npx shadcn@latest add <name>` from the repo root (`components.json` lives
   there, because that is where `package.json` is). They are first-party code
@@ -16,8 +18,8 @@ step — the server has none.
   variants for Fest's status tones.
 - `src/components/live/` — the live screen's aggregate widgets: the scrolling
   pulse, the ranked rollup boards, the connection indicator.
-- `src/components/` — shared UI: the chart wrappers (`charts.tsx`), the
-  routing-config card, small primitives (`ui.tsx`).
+- `src/components/` — shared UI: the chart wrappers (`charts.tsx`), small
+  primitives (`ui.tsx`).
 - `src/lib/` — the non-visual layer: `api.ts` (fetch wrappers typed against
   `shared/api.ts`), `auth.ts` (session calls), `sse.ts` (the live feed),
   `router.ts`, `range.ts`, `format.ts`, `theme.tsx` (light/dark, class on

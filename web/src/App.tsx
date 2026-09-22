@@ -4,9 +4,10 @@
  *
  * Screen order is landing order — the live feed first, because "is this thing
  * working and what is going through it right now" is the question someone opens
- * a gateway dashboard with. Routing sits immediately behind it: "whose
- * credential paid for this" is the compliance question Fest exists to answer,
- * and it should not need looking for.
+ * a gateway dashboard with. Routing sits immediately behind it: "what will this
+ * gateway do to my traffic — and to a model I did not ask it to touch" is
+ * config rather than history, and it should not need looking for. Who actually
+ * paid is on Stats, with the rest of what already happened.
  */
 
 import { useEffect, useState } from "react";
@@ -126,8 +127,9 @@ function Dashboard({
   const range = rangeFor(rangeId);
 
   // The live feed is its own clock; a range picker on it would imply it shows
-  // history, which it does not.
-  const showRange = page !== "live";
+  // history, which it does not. Routing is config, not traffic — a range there
+  // would imply the table had a past on this screen, and it does not.
+  const showRange = page !== "live" && page !== "routing";
 
   return (
     // The shell owns the viewport and only the main panel scrolls, so the
@@ -199,7 +201,7 @@ function Dashboard({
         </div>
 
         {page === "live" && <LivePage />}
-        {page === "routing" && <RoutingPage range={range} />}
+        {page === "routing" && <RoutingPage />}
         {page === "stats" && <StatsPage range={range} />}
         {page === "users" && <UsersPage range={range} />}
         {page === "models" && <ModelsPage range={range} />}

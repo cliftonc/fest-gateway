@@ -16,8 +16,10 @@ import { useSyncExternalStore } from "react";
  * Nav order is landing order. The live feed is first because it answers "is
  * this thing working, and what is going through it right now" without the
  * reader having to pick a question first; routing is immediately behind it
- * because "whose credential paid for that" is the compliance question the
- * gateway exists to answer, and it should not need looking for.
+ * because "what will this gateway substitute, and what does it add" is the
+ * config an operator must be able to check before traffic proves it, and it
+ * should not need looking for. What it then cost, and whose credential paid,
+ * is Stats.
  */
 export const PAGES = ["live", "routing", "stats", "users", "models", "errors", "admin"] as const;
 export type PageId = (typeof PAGES)[number];

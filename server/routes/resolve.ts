@@ -51,7 +51,7 @@ function matches(pattern: string, model: string): boolean {
  * therefore agree by construction: every id Fest publishes is an id Fest can
  * route, and there is no way to publish one without routing it.
  */
-function claims(route: Route, model: string): boolean {
+export function claimsModel(route: Route, model: string): boolean {
   return route.expose === model || matches(route.match, model);
 }
 
@@ -85,7 +85,7 @@ export function resolveRoute(table: RouteTable, requestedModel: string | null): 
   let bestRank: [number, number, number] | null = null;
 
   table.routes.forEach((route, index) => {
-    if (!claims(route, requestedModel)) return;
+    if (!claimsModel(route, requestedModel)) return;
     const r = rank(route, index, requestedModel);
     if (bestRank === null || better(r, bestRank)) {
       best = route;

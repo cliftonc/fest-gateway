@@ -11,6 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseRouteTable, RouteConfigError, EMPTY_ROUTE_TABLE } from "../server/routes/table.ts";
 import { resolveRoute } from "../server/routes/resolve.ts";
+import { explainRoutes } from "../server/api/routing-view.ts";
 
 const UPSTREAM = {
   fireworks: {
@@ -400,4 +401,79 @@ test("an unset credential is reported as absent rather than omitted", async () =
   // A route that will refuse every request it matches must be visible BEFORE a
   // developer discovers it mid-task.
   assert.equal(JSON.parse(payload).upstreams[0].credentialPresent, false);
+});
+
+// ── how the dashboard classifies a rule ──────────────────────────────────────
+//
+// The Routing screen splits rules into "substitutes for a model Anthropic
+// offers" and "adds a model that exists only here". Getting that wrong is not a
+// cosmetic bug: it either files a substitution under a heading an operator reads
+// as harmless, or reports a rule as adding something it does not add.
+
+test("a wildcard covering a base model is a substitution, not an addition", () => {
+  const table = parseRouteTable(
+    config([{ id: "sonnet-family", match: "claude-sonnet-*", upstream: "fireworks", model: "accounts/x/kimi" }]),
+  );
+  const [row] = explainRoutes(table);
+  assert.deepEqual(row?.shadows, ["claude-sonnet-5"], "the pattern claims Anthropic's Sonnet");
+  assert.deepEqual(row?.menuIds, [], "a pattern has no id to publish in the menu");
+});
+
+test("an exact rule outranks a wildcard, and the wildcard still reads as a substitution", () => {
+  const table = parseRouteTable(
+    config([
+      // Deliberately BELOW the wildcard in file order: exactness wins anyway,
+      // and the dashboard must describe what the resolver does, not the file.
+      { id: "sonnet-family", match: "claude-sonnet-*", upstream: "fireworks", model: "accounts/x/kimi" },
+      { id: "sonnet-real", match: "claude-sonnet-5", upstream: "fireworks", model: "accounts/x/glm" },
+    ]),
+  );
+  const rows = explainRoutes(table);
+  const exact = rows.find((r) => r.route.id === "sonnet-real");
+  const wildcard = rows.find((r) => r.route.id === "sonnet-family");
+
+  assert.deepEqual(exact?.shadows, ["claude-sonnet-5"], "the exact rule is what a request gets");
+  assert.deepEqual(wildcard?.shadows, [], "so the wildcard must not claim it too");
+  assert.deepEqual(
+    wildcard?.outranked,
+    [{ model: "claude-sonnet-5", takenBy: "sonnet-real" }],
+    "but it is still a rule about Sonnet, and says which rule takes that id",
+  );
+});
+
+test("a rule for an id Anthropic does not offer only adds", () => {
+  const table = parseRouteTable(
+    config([{ id: "oss", match: "claude-oss-120b", upstream: "fireworks", model: "accounts/x/gpt-oss-120b" }]),
+  );
+  const [row] = explainRoutes(table);
+  assert.deepEqual(row?.shadows, [], "nothing is taken away from a developer");
+  assert.deepEqual(row?.outranked, []);
+  assert.deepEqual(row?.menuIds, ["claude-oss-120b"], "and it appears in the gateway menu");
+});
+
+test("an expose alias is reported as the menu id of the rule that substitutes", () => {
+  const table = parseRouteTable(
+    config([
+      {
+        id: "sonnet",
+        match: "claude-sonnet-5",
+        upstream: "fireworks",
+        model: "accounts/x/kimi",
+        expose: "claude-sonnet-5-fireworks",
+      },
+    ]),
+  );
+  const [row] = explainRoutes(table);
+  assert.deepEqual(row?.shadows, ["claude-sonnet-5"]);
+  // The substituted id itself is a base model, so it is reported as a
+  // substitution and not double-counted as something this gateway adds.
+  assert.deepEqual(row?.menuIds, ["claude-sonnet-5-fireworks"]);
+});
+
+test("a menu id Fest could not serve is never reported as added", () => {
+  // No upstream: the rule keeps the model on the caller's own credential, so in
+  // the key posture there is nothing to serve it with and the menu omits it.
+  const table = parseRouteTable(config([{ id: "keep", match: "claude-oss-120b", upstream: null }], {}));
+  const [row] = explainRoutes(table);
+  assert.deepEqual(row?.menuIds, [], "the screen promises only what the menu promises");
 });

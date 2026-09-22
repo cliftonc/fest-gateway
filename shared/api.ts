@@ -220,6 +220,36 @@ export interface RouteWire {
   readonly upstream: string | null;
   /** Null means the requested model id is sent unchanged. */
   readonly model: string | null;
+  /** The extra menu id this rule publishes, if any. Null for most rules. */
+  readonly expose: string | null;
+  /**
+   * Anthropic base model ids this rule actually claims — the substitutions.
+   *
+   * Derived by asking the real resolver, not by re-reading the pattern, so
+   * precedence is already applied: a `claude-*` catch-all that an exact rule
+   * overrides for Opus does not list Opus here. That distinction is the whole
+   * value of the field — "asking for this gets something else" is a different
+   * statement from "this pattern happens to spell the id".
+   */
+  readonly shadows: readonly string[];
+  /**
+   * Base model ids this rule covers, but which a more specific rule takes.
+   *
+   * `claude-sonnet-*` with an exact `claude-sonnet-5` rule above it: the
+   * wildcard is still a rule about Sonnet — it claims every other Sonnet id,
+   * including the next one Anthropic ships — so it reads as a substitution and
+   * not as a model this gateway adds. `takenBy` names the rule that wins today.
+   */
+  readonly outranked: readonly { readonly model: string; readonly takenBy: string }[];
+  /**
+   * Ids this rule adds to the `/model` menu that Anthropic does not offer.
+   *
+   * Base model ids are excluded: those are substitutions, reported in
+   * `shadows`. So this list is exactly "models that exist only because traffic
+   * goes through Fest", which is the other half of what routing does and reads
+   * nothing like a substitution.
+   */
+  readonly menuIds: readonly string[];
 }
 
 export interface RoutingResponse {

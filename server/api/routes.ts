@@ -29,7 +29,7 @@ import {
 import type { UsageSink } from "../ingest/sink.ts";
 import type { LiveBus } from "../ingest/live-bus.ts";
 import type { RouteTable } from "../routes/table.ts";
-import { evaluationOrder } from "../routes/resolve.ts";
+import { explainRoutes } from "./routing-view.ts";
 import { ADAPTER_TRANSFORMS } from "../adapters/registry.ts";
 import type { SecretResolver } from "../credentials/provider.ts";
 import { handleLive } from "./live.ts";
@@ -183,11 +183,18 @@ export function handleApi(
           credentialPresent: deps.secrets.resolve(u.credential) !== null,
           transforms: ADAPTER_TRANSFORMS[u.adapter] ?? [],
         })),
-        routes: evaluationOrder(deps.routes).map((r) => ({
-          id: r.id,
-          match: r.match,
-          upstream: r.upstream,
-          model: r.model,
+        // Already in evaluation order, each row carrying what it claims and
+        // what it adds — see `routing-view.ts` for why the dashboard is not
+        // left to infer either from the pattern.
+        routes: explainRoutes(deps.routes).map(({ route, shadows, outranked, menuIds }) => ({
+          id: route.id,
+          match: route.match,
+          upstream: route.upstream,
+          model: route.model,
+          expose: route.expose,
+          shadows,
+          outranked,
+          menuIds,
         })),
       } satisfies RoutingResponse);
       return true;
