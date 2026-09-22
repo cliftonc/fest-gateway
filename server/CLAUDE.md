@@ -62,6 +62,11 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
 - **`secret/`** — `fingerprint.ts` (one definition of "this looks like a
   secret," used by the log redactor and the leak tests) and
   `non-persistable.ts` (a wrapper whose `toString`/`toJSON` always redact).
+- **`basePath`** — Fest may be mounted under a path. `config.ts` derives it
+  from `FEST_PUBLIC_URL`, `http/server.ts` strips it from incoming requests
+  (the proxy may or may not have already), and `http/static.ts` rewrites the
+  dashboard's `<base href>` to it. Any new redirect or absolute URL the server
+  hands a browser must be built on it — `${cfg.basePath}/`, never `/`.
 - **`config.ts`** — all configuration, entirely from the environment,
   validated once at boot. **Any field added here that can hold a secret must
   also be redacted in `describeConfig()`** — that function's whole job is to

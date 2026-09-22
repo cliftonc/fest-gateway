@@ -6,6 +6,12 @@
     <!-- No external requests: this dashboard renders a team's traffic metadata
          and must be usable on an air-gapped host. Inter is bundled, not fetched. -->
     <meta name="referrer" content="no-referrer" />
+    <!-- Every relative URL in the bundle, and every API call in src/lib/base.ts,
+         resolves against this. The gateway rewrites the href when it is mounted
+         under a path (FEST_BASE_PATH / the path of FEST_PUBLIC_URL), which is
+         what lets one build serve from `/` or from `/fest` unchanged. It must
+         stay ahead of the first relative URL below to apply to it. -->
+    <base href="/" />
     <link rel="icon" href="./nearform-icon.svg" />
     <title>Fest</title>
     <script>

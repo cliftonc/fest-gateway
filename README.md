@@ -209,9 +209,47 @@ the server only ever sees plain HTTP and cannot detect this for itself.
 | `FEST_GITHUB_CLIENT_ID`, `FEST_GITHUB_CLIENT_SECRET` | GitHub OAuth, same idea. |
 | `FEST_ALLOWED_EMAIL_DOMAINS` | comma-separated. **Required to enable OAuth at all** — empty refuses every OAuth login rather than allowing any Google/GitHub account. |
 | `FEST_PUBLIC_URL` | base URL Fest is reachable at, for building the OAuth redirect URI. Defaults to `http://<host>:<port>`. |
+| `FEST_BASE_PATH` | mount path, if Fest is not at the root of its origin. Defaults to the path of `FEST_PUBLIC_URL`, so setting that is usually enough. |
 
 See [docs/CLI-AUTH.md](docs/CLI-AUTH.md) for the full OAuth setup and how
 `fest login`'s loopback flow works.
+
+### Behind Caddy, on a path
+
+Fest can be mounted under a path rather than on its own hostname —
+`https://lastlight.nearform.dev/fest`. Set `FEST_PUBLIC_URL` to the full URL
+including that path and Fest takes the mount point from it: the dashboard's
+`<base href>` is rewritten to match, and the OAuth redirect URI is built
+against it.
+
+```caddyfile
+lastlight.nearform.dev {
+	handle_path /fest/* {
+		reverse_proxy 127.0.0.1:8787 {
+			# SSE: /api/live is a long-lived event stream, and a buffering
+			# proxy turns the live screen into a screen that updates once.
+			flush_interval -1
+		}
+	}
+}
+```
+
+```bash
+FEST_PUBLIC_URL=https://lastlight.nearform.dev/fest
+FEST_SECURE_COOKIES=1
+```
+
+`handle_path` strips the `/fest` prefix before proxying. A plain `handle` +
+`reverse_proxy`, which does not strip it, works too — Fest removes its own
+mount path from an incoming request when it is still there, so either spelling
+routes. Caddy passes the original `Host` upstream by default, which the CSRF
+origin check needs; on nginx that is `proxy_set_header Host $host`, and
+`proxy_buffering off` for the event stream.
+
+The registered OAuth redirect URI must include the path —
+`https://lastlight.nearform.dev/fest/api/auth/oauth/google/callback`. Developers
+point both Claude Code and the CLI at the full prefixed URL
+(`fest login --server https://lastlight.nearform.dev/fest`).
 
 ## Requirements
 

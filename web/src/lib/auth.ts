@@ -9,15 +9,16 @@
  */
 
 import type { MeResponse } from "../../../shared/api.ts";
+import { appUrl } from "./base.ts";
 
 export async function fetchMe(): Promise<MeResponse> {
-  const res = await fetch("/api/auth/me", { headers: { accept: "application/json" } });
+  const res = await fetch(appUrl("api/auth/me"), { headers: { accept: "application/json" } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as MeResponse;
 }
 
 async function post(path: string, body?: unknown): Promise<Response> {
-  return fetch(path, {
+  return fetch(appUrl(path), {
     method: "POST",
     headers: {
       accept: "application/json",

@@ -17,7 +17,7 @@
  * answering it with an HTML page would hide exactly the signal we built it for.
  */
 
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import type { ServerResponse } from "node:http";
 
@@ -48,10 +48,54 @@ function fileSize(path: string): number | null {
   }
 }
 
-export function createStaticHost(rootDir: string): StaticHost {
+/**
+ * Point the document's `<base href>` at wherever Fest is actually mounted.
+ *
+ * The built bundle is emitted with `base: "./"`, so its asset URLs are already
+ * relative; what they resolve *against* is this tag. Rewriting it here rather
+ * than at build time is what keeps one artifact servable from `/` and from
+ * `/fest` — including when a reader arrives at `/fest` with no trailing slash,
+ * where the document's own URL would otherwise resolve `./assets/…` against
+ * the origin root and 404.
+ */
+export function withBaseHref(html: string, basePath: string): string {
+  const href = `${basePath}/`;
+  const tag = `<base href="${href}" />`;
+  // Test for the tag rather than comparing before/after: rewriting a document
+  // that already carries the right href is a no-op, and reading that as "no tag
+  // found" would append a second one on every serve.
+  if (/<base\b[^>]*>/i.test(html)) return html.replace(/<base\b[^>]*>/i, tag);
+  // No tag to rewrite (a hand-edited or third-party index.html). Insert one,
+  // since a sub-path deployment is broken without it.
+  return html.replace(/<head\b[^>]*>/i, (head) => `${head}\n    ${tag}`);
+}
+
+export function createStaticHost(rootDir: string, basePath = ""): StaticHost {
   const root = resolve(rootDir);
   const index = join(root, "index.html");
   const available = fileSize(index) !== null;
+
+  /**
+   * Read at request time, not cached at boot: `npm run dev` rebuilds the bundle
+   * under a running server, and a cached copy would serve the previous deploy's
+   * HTML until restart. It is ~1.5KB, and only the document hits this path.
+   */
+  function sendIndex(res: ServerResponse): boolean {
+    let html: string;
+    try {
+      html = readFileSync(index, "utf8");
+    } catch {
+      return false;
+    }
+    const body = Buffer.from(withBaseHref(html, basePath), "utf8");
+    res.writeHead(200, {
+      "content-type": TYPES[".html"] ?? "text/html; charset=utf-8",
+      "content-length": String(body.byteLength),
+      "cache-control": "no-cache",
+    });
+    res.end(body);
+    return true;
+  }
 
   function send(res: ServerResponse, file: string, size: number, immutable: boolean): void {
     const ext = extname(file).toLowerCase();
@@ -86,6 +130,10 @@ export function createStaticHost(rootDir: string): StaticHost {
       const inRoot = candidate === root || candidate.startsWith(root + sep);
 
       if (inRoot) {
+        // index.html goes through sendIndex wherever it is asked for, so a
+        // direct request for it cannot bypass the <base href> rewrite that the
+        // fallback below applies.
+        if (candidate === index) return sendIndex(res);
         const size = fileSize(candidate);
         if (size !== null) {
           send(res, candidate, size, candidate.startsWith(join(root, "assets") + sep));
@@ -95,11 +143,7 @@ export function createStaticHost(rootDir: string): StaticHost {
 
       // SPA fallback: extensionless, non-API, non-proxy paths are client routes.
       if (extname(decoded) === "" && !decoded.startsWith("/v1/") && !decoded.startsWith("/api/")) {
-        const size = fileSize(index);
-        if (size !== null) {
-          send(res, index, size, false);
-          return true;
-        }
+        return sendIndex(res);
       }
 
       return false;

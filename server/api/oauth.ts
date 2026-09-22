@@ -287,7 +287,9 @@ async function callback(
     ...clearCookies,
     serializeCookie(created.raw, { secure: cfg.secureCookies, maxAgeSeconds: Math.floor(ABSOLUTE_MS / 1000) }),
   ]);
-  res.writeHead(302, { location: "/" });
+  // The dashboard root as the browser sees it, which is not `/` when Fest is
+  // mounted under a path — redirecting there would leave the prefix behind.
+  res.writeHead(302, { location: `${cfg.basePath}/` });
   res.end();
 }
 

@@ -10,6 +10,7 @@
 
 import { useState } from "react";
 import { login } from "../lib/auth.ts";
+import { appUrl } from "../lib/base.ts";
 import { Brand } from "../App.tsx";
 import { Button } from "../components/ui/button.tsx";
 import { Input } from "../components/ui/input.tsx";
@@ -77,7 +78,9 @@ export function LoginPage({
               // Real anchors: these are full-page navigations to the OAuth
               // start endpoint, not in-app actions.
               <Button key={p} variant="outline" asChild>
-                <a href={`/api/auth/oauth/${p}/start`}>Continue with {PROVIDER_LABEL[p] ?? p}</a>
+                <a href={appUrl(`api/auth/oauth/${p}/start`)}>
+                  Continue with {PROVIDER_LABEL[p] ?? p}
+                </a>
               </Button>
             ))}
             {!setupRequired && (

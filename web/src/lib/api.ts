@@ -19,6 +19,7 @@ import type {
   RoutingResponse,
   UsersResponse,
 } from "../../../shared/api.ts";
+import { appUrl } from "./base.ts";
 
 export interface Range {
   readonly fromMs: number;
@@ -39,7 +40,7 @@ async function get<T>(path: string, params: Record<string, string | undefined>):
     if (v !== undefined && v !== "") search.set(k, v);
   }
   const qs = search.toString();
-  const res = await fetch(`/api/${path}${qs === "" ? "" : `?${qs}`}`, {
+  const res = await fetch(appUrl(`api/${path}${qs === "" ? "" : `?${qs}`}`), {
     headers: { accept: "application/json" },
   });
   if (res.status === 401) {

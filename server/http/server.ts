@@ -60,8 +60,29 @@ function pathnameOf(url: string): string {
 /** `web/dist`, relative to this file, so it resolves from any cwd. */
 const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
 
+/**
+ * Drop the mount prefix from an incoming path, if it is still on it.
+ *
+ * Whether it is depends on the proxy: Caddy's `handle_path` and nginx's
+ * `proxy_pass` with a trailing slash strip it, a bare `reverse_proxy` inside a
+ * `handle` block does not. Accepting both means a working deployment does not
+ * hinge on which of those the operator reached for. `/fest` with nothing after
+ * it becomes `/`, not the empty string, because everything downstream matches
+ * on a leading slash.
+ */
+export function stripBasePath(url: string, basePath: string): string {
+  if (basePath === "" || !url.startsWith(basePath)) return url;
+  const rest = url.slice(basePath.length);
+  if (rest === "") return "/";
+  if (rest.startsWith("?")) return `/${rest}`;
+  // Only a real segment boundary counts: `/festival` must not be read as
+  // `/fest` + `ival`.
+  return rest.startsWith("/") ? rest : url;
+}
+
 export function createServer(deps: ServerDeps): Server {
-  const web = createStaticHost(WEB_DIST);
+  const basePath = deps.config.basePath;
+  const web = createStaticHost(WEB_DIST, basePath);
   if (!web.available) {
     log.info("dashboard bundle not built; serving API only", { expected: WEB_DIST });
   }
@@ -82,7 +103,7 @@ export function createServer(deps: ServerDeps): Server {
   };
 
   const server = http.createServer((req, res) => {
-    const url = req.url ?? "/";
+    const url = stripBasePath(req.url ?? "/", basePath);
     const { remainder } = parseIdentityPath(url);
     const path = pathnameOf(remainder);
     const method = req.method ?? "GET";

@@ -41,6 +41,21 @@ export interface FestConfig {
   readonly secureCookies: boolean;
   /** Base URL Fest is reachable at, used to build OAuth redirect URIs. */
   readonly publicUrl: string;
+  /**
+   * The path Fest is mounted at when it is not at the root of its origin —
+   * `/fest` for `https://host/fest`, and `""` for the ordinary case.
+   *
+   * Derived from `FEST_PUBLIC_URL`'s own path, so a sub-path deployment that
+   * has already been configured for OAuth needs no second setting;
+   * `FEST_BASE_PATH` overrides it for a deployment with no OAuth at all.
+   *
+   * It does two things. The dashboard's `<base href>` is set from it, which is
+   * what makes the bundle's relative asset URLs and its API calls resolve
+   * against the prefix instead of the origin root. And incoming request paths
+   * are stripped of it when present, so Fest works behind a proxy whether or
+   * not that proxy strips the prefix itself.
+   */
+  readonly basePath: string;
   readonly googleClientId: string | null;
   readonly googleClientSecret: string | null;
   readonly githubClientId: string | null;
@@ -53,6 +68,28 @@ export interface FestConfig {
    * substitute path, so "nobody configured this" must mean "off", not "open".
    */
   readonly allowedEmailDomains: readonly string[];
+}
+
+/**
+ * `/fest/`, `fest`, `//fest//` -> `/fest`; `/`, `""` and anything that is only
+ * slashes -> `""`. One leading slash, no trailing one, so callers can always
+ * write `${basePath}/rest` and `path.startsWith(basePath)` without a special
+ * case for the root deployment.
+ */
+export function normalizeBasePath(raw: string): string {
+  const trimmed = raw.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+  return trimmed === "" ? "" : `/${trimmed}`;
+}
+
+function basePathFrom(explicit: string | null, publicUrl: string): string {
+  if (explicit !== null) return normalizeBasePath(explicit);
+  try {
+    return normalizeBasePath(new URL(publicUrl).pathname);
+  } catch {
+    // publicUrl is validated elsewhere; an unparseable one means no prefix
+    // rather than a boot failure in a code path about cosmetics.
+    return "";
+  }
 }
 
 function intFromEnv(name: string, fallback: number): number {
@@ -105,6 +142,10 @@ export function loadConfig(): FestConfig {
 
   const port = intFromEnv("FEST_PORT", 8787);
   const host = (process.env.FEST_HOST ?? "127.0.0.1").trim();
+  const publicUrl = (stringFromEnv("FEST_PUBLIC_URL") ?? `http://${host}:${port}`).replace(
+    /\/+$/,
+    "",
+  );
 
   return {
     port,
@@ -116,7 +157,8 @@ export function loadConfig(): FestConfig {
     requireIdentity: boolFromEnv("FEST_REQUIRE_IDENTITY", false),
     routesPath: (process.env.FEST_ROUTES ?? "").trim() || null,
     secureCookies: boolFromEnv("FEST_SECURE_COOKIES", false),
-    publicUrl: (stringFromEnv("FEST_PUBLIC_URL") ?? `http://${host}:${port}`).replace(/\/+$/, ""),
+    publicUrl,
+    basePath: basePathFrom(stringFromEnv("FEST_BASE_PATH"), publicUrl),
     googleClientId: stringFromEnv("FEST_GOOGLE_CLIENT_ID"),
     googleClientSecret: stringFromEnv("FEST_GOOGLE_CLIENT_SECRET"),
     githubClientId: stringFromEnv("FEST_GITHUB_CLIENT_ID"),

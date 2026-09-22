@@ -51,6 +51,13 @@ step — the server has none.
   wire contracts — don't `fetch()` an endpoint ad hoc from inside a page
   component; add or extend a function in `lib/api.ts` so the shape stays
   centrally typed.
+- **No URL in this bundle may start with `/`.** Fest can be served from a
+  path (`https://host/fest`), and a root-absolute `fetch("/api/…")`, `href`
+  or `EventSource` escapes the prefix and hits the origin root instead.
+  Everything goes through `appUrl()` in `src/lib/base.ts`, which resolves
+  against the `<base href>` the gateway rewrites per deployment. This fails
+  silently at the root and only breaks on a sub-path deployment, so it will
+  not be caught by local testing.
 - `npm run dev` serves this via Vite with HMR, proxying `/api/*` to the
   gateway (see `vite.config.ts` for the target). **`/v1/*` is not proxied** —
   only the dashboard's own API is. Anything that needs the actual inference

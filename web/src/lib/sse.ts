@@ -13,6 +13,7 @@
  */
 
 import type { LiveFrame, LiveRowWire } from "../../../shared/api.ts";
+import { appUrl } from "./base.ts";
 
 export interface LiveHandlers {
   readonly onRows: (rows: readonly LiveRowWire[]) => void;
@@ -22,7 +23,7 @@ export interface LiveHandlers {
 }
 
 export function subscribeLive(handlers: LiveHandlers): () => void {
-  const source = new EventSource("/api/live");
+  const source = new EventSource(appUrl("api/live"));
 
   source.addEventListener("open", () => {
     handlers.onStatus?.(true);
