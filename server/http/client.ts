@@ -13,6 +13,10 @@
  *    user-agent is the SDK's (`Anthropic/JS 0.94.0`). What gives it away is
  *    GitHub's own pair, `x-initiator` and `x-interaction-type`, which it adds
  *    to every model call. It sends no session id at all.
+ *  - Copilot CLI on its own login (the `/copilot` mount) talks to GitHub's
+ *    Copilot API, and sends that API's headers: `copilot-integration-id`
+ *    (`copilot-developer-cli`) on every call, and `x-client-session-id`, the
+ *    same id `copilot --resume` takes.
  *
  * `fest codex` and `fest copilot` also send `X-Fest-Client`, which wins when
  * present (`x-fest-*` is stripped before anything goes upstream). The sniffing
@@ -45,6 +49,7 @@ export function detectClient(headers: Headers): Client | null {
   if (first(headers, "x-initiator") !== null && first(headers, "x-interaction-type") !== null) {
     return "copilot";
   }
+  if (first(headers, "copilot-integration-id") !== null) return "copilot";
   return null;
 }
 
@@ -54,6 +59,7 @@ export function sessionIdOf(headers: Headers): string | null {
     first(headers, "x-claude-code-session-id") ??
     first(headers, "session-id") ??
     first(headers, "session_id") ??
+    first(headers, "x-client-session-id") ??
     null
   );
 }

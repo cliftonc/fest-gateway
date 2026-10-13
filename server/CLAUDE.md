@@ -29,8 +29,13 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   `/openai` (API key → api.openai.com) and `/chatgpt` (ChatGPT login →
   chatgpt.com, recorded as a subscription). `wire.ts` holds the per-API
   differences the relay needs — usage events, error envelope, quota headers —
-  so `passthrough.ts` serves both the Anthropic and the OpenAI Responses wire
-  without forking.
+  so `passthrough.ts` serves the Anthropic, OpenAI Responses and Chat
+  Completions wires without forking. `copilot.ts` is the `/copilot/<plan>` mount
+  for Copilot CLI on its own login: it meters the three model calls through
+  `handleMessages` on Copilot variants of those wires, relays everything else
+  under the mount unrecorded, and relays the built-in GitHub MCP server's
+  root-level `/mcp/…` calls, which Copilot sends without the mount's path. The
+  upstream is one of GitHub's three plan hosts, never a caller-named one.
 - **`adapters/`** — per-provider substitute-path adapters (`anthropic.ts`,
   `fireworks.ts`). An adapter is a credential + model-id swap, not a wire
   translator — Fireworks serves an Anthropic-compatible `/v1/messages`, so
@@ -63,7 +68,8 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   `ensureUser`, idempotent), `audit.ts`, `retention.ts`, `seed.ts`.
 - **`usage/`** — `accumulator.ts` (SSE usage events, last-wins on
   `output_tokens`, never summed), `responses.ts` (the same for OpenAI's
-  Responses API, splitting cached tokens out of `input_tokens`), `cost.ts`
+  Responses API, splitting cached tokens out of `input_tokens`), `chat.ts`
+  (Chat Completions, the same split out of `prompt_tokens`), `cost.ts`
   (null-propagating cost algebra —
   `null` means unavailable, never zero), `pricing.ts` (prices one call, and
   returns BOTH org spend and notional list-rate value), `prices/` (the vendored

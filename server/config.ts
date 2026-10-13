@@ -55,6 +55,20 @@ export interface FestConfig {
    */
   readonly chatgptBaseUrl: string | null;
   /**
+   * Where `/copilot/<plan>/*` (Copilot CLI on its own Copilot login) is relayed,
+   * as a template: `{plan}` becomes the developer's plan (`individual`,
+   * `business` or `enterprise`), because GitHub serves each plan from its own
+   * host. null refuses the mount. On by default, like the Codex mounts;
+   * `FEST_COPILOT_BASE_URL=off`. See `pipeline/copilot.ts`.
+   */
+  readonly copilotBaseUrl: string | null;
+  /**
+   * Where Copilot's built-in GitHub MCP server is relayed. Copilot sends those
+   * calls to `<origin>/mcp/…`, dropping the path of its API URL, so they reach
+   * Fest at the root rather than under `/copilot`. `FEST_COPILOT_MCP_BASE_URL=off`.
+   */
+  readonly copilotMcpBaseUrl: string | null;
+  /**
    * Marks the dashboard session cookie `Secure` and gives it the `__Host-`
    * prefix. Set it whenever Fest is reached over HTTPS — including behind a TLS
    * terminating proxy, where the server itself only ever sees plain HTTP and so
@@ -161,14 +175,17 @@ function stringFromEnv(name: string): string | null {
  * A Codex upstream: the default, a URL, or `off`.
  *
  * Same https rule as Bedrock, for a stronger reason: on `/chatgpt` the bearer
- * crossing this hop is the developer's whole ChatGPT account.
+ * crossing this hop is the developer's whole ChatGPT account, and on `/copilot`
+ * it is their GitHub token.
  */
 function codexUpstreamFromEnv(name: string, fallback: string): string | null {
   const raw = stringFromEnv(name) ?? fallback;
   if (raw.toLowerCase() === "off") return null;
   let parsed: URL;
   try {
-    parsed = new URL(raw);
+    // A template's placeholder is filled in for validation only: `{` is not
+    // something to bet on a URL parser accepting in a hostname.
+    parsed = new URL(raw.replaceAll("{plan}", "individual"));
   } catch {
     throw new Error(`${name} is not a valid URL: ${JSON.stringify(raw)}`);
   }
@@ -224,6 +241,8 @@ export function loadConfig(): FestConfig {
 
   const openai = codexUpstreamFromEnv("FEST_OPENAI_BASE_URL", "https://api.openai.com");
   const chatgpt = codexUpstreamFromEnv("FEST_CHATGPT_BASE_URL", "https://chatgpt.com");
+  const copilot = codexUpstreamFromEnv("FEST_COPILOT_BASE_URL", "https://api.{plan}.githubcopilot.com");
+  const copilotMcp = codexUpstreamFromEnv("FEST_COPILOT_MCP_BASE_URL", "https://api.githubcopilot.com");
 
   const port = intFromEnv("FEST_PORT", 8787);
   const host = (process.env.FEST_HOST ?? "127.0.0.1").trim();
@@ -244,6 +263,8 @@ export function loadConfig(): FestConfig {
     bedrockBaseUrl: bedrock?.replace(/\/+$/, "") ?? null,
     openaiBaseUrl: openai,
     chatgptBaseUrl: chatgpt,
+    copilotBaseUrl: copilot,
+    copilotMcpBaseUrl: copilotMcp,
     secureCookies: boolFromEnv("FEST_SECURE_COOKIES", false),
     publicUrl,
     basePath: basePathFrom(stringFromEnv("FEST_BASE_PATH"), publicUrl),

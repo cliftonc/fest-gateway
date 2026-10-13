@@ -46,6 +46,11 @@ export type CredentialKind =
   | "FIREPASS_KEY"
   /** `sk-proj-…`, `sk-svcacct-…` or a legacy `sk-…`: Codex on an API key. */
   | "OPENAI_API_KEY"
+  /**
+   * `gho_…` (an OAuth app's token, which is what Copilot CLI's own login
+   * holds), `ghu_…`, `github_pat_…`, `ghp_…`. Forwarded on `/copilot` only.
+   */
+  | "GITHUB_TOKEN"
   | "FEST_IDENTITY_TOKEN"
   | "EMPTY"
   | "UNKNOWN";
@@ -89,6 +94,7 @@ export function classifyCredential(header: string, rawValue: string): Credential
   else if (token.startsWith("fw_")) kind = "FIREWORKS_KEY";
   else if (token.startsWith("fpk_")) kind = "FIREPASS_KEY";
   else if (token.startsWith("fest_")) kind = "FEST_IDENTITY_TOKEN";
+  else if (/^(?:gh[opsu]_|github_pat_)/.test(token)) kind = "GITHUB_TOKEN";
   // After every `sk-ant-` case, so an Anthropic key can never land here.
   else if (token.startsWith("sk-")) kind = "OPENAI_API_KEY";
 
@@ -96,7 +102,11 @@ export function classifyCredential(header: string, rawValue: string): Credential
     header,
     scheme: bearer ? "Bearer" : "raw",
     kind,
-    prefix: token.slice(0, Math.min(PREFIX_CHARS, token.length)),
+    // A GitHub token's family prefix is short (`gho_`), so the usual 11
+    // characters would carry seven of its secret ones. Keep the family only.
+    prefix: kind === "GITHUB_TOKEN"
+      ? (/^(?:gh[opsu]_|github_pat_)/.exec(token)?.[0] ?? "")
+      : token.slice(0, Math.min(PREFIX_CHARS, token.length)),
     length: token.length,
     fingerprint: fingerprint(token),
   };

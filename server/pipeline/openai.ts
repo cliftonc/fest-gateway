@@ -107,13 +107,13 @@ export async function handleCodexModels(
   }
 }
 
-/** Refuse a mount whose upstream an operator switched off. */
+/** Refuse a mount whose upstream an operator switched off. Also used by `/copilot`. */
 export function refuseDisabled(res: ServerResponse, envVar: string): void {
   res.writeHead(501, { "content-type": "application/json", "x-should-retry": "false" });
   res.end(
     openaiError(
       "invalid_request_error",
-      `Fest: this gateway does not relay this Codex backend (${envVar} is set to "off").`,
+      `Fest: this gateway does not relay this backend (${envVar} is set to "off").`,
     ),
   );
 }

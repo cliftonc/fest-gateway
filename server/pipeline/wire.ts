@@ -12,6 +12,11 @@
  *    CLI in BYOK mode with `COPILOT_PROVIDER_TYPE=anthropic`.
  *  - `openai-responses` — the Responses API. Codex on an API key (`/openai`)
  *    and on a ChatGPT login (`/chatgpt`).
+ *  - `openai-chat` — Chat Completions. Only Copilot's own API (`/copilot`)
+ *    speaks it to Fest today.
+ *
+ * `/copilot` relays all three, on Copilot variants of each (see the bottom of
+ * this file).
  */
 
 import type { RateLimitSnapshot, UsagePayload } from "../../shared/types.ts";
@@ -29,6 +34,7 @@ import {
   usageFromJson,
   type UsageAccumulator,
 } from "../usage/accumulator.ts";
+import { CHAT_USAGE_EVENT_TYPES, chatUsageFromJson, createChatAccumulator } from "../usage/chat.ts";
 import {
   createResponsesAccumulator,
   responsesUsageFromJson,
@@ -37,7 +43,7 @@ import {
 } from "../usage/responses.ts";
 
 export interface WireProfile {
-  readonly id: "anthropic" | "openai-responses";
+  readonly id: "anthropic" | "openai-responses" | "openai-chat";
   readonly usageEventTypes: ReadonlySet<string>;
   readonly maxEventChars?: number | undefined;
   createAccumulator(): UsageAccumulator;
@@ -99,4 +105,60 @@ export const OPENAI_RESPONSES_WIRE: WireProfile = {
   // windows, which do.
   parseRateLimit: parseCodexRateLimit,
   upstreamRequestId: (h) => h.get("x-request-id") ?? h.get("x-oai-request-id"),
+};
+
+/**
+ * Copilot's own API, on the developer's Copilot login (`/copilot`).
+ *
+ * The usage events are the stock ones for each wire — captured from Copilot CLI
+ * 1.0.96 against api.individual.githubcopilot.com — so the parsing is shared.
+ * Two things differ from the Anthropic and OpenAI originals:
+ *
+ *  - Every response header is relayed except credentials and hop-by-hop ones.
+ *    Copilot reads its plan quota from `x-quota-snapshot-*`, and its MCP
+ *    traffic depends on `mcp-session-id`; an allowlist would be a list of the
+ *    headers someone remembered. The developer is the one the response is
+ *    addressed to, and `set-cookie` stays dropped by `buildDownstreamHeaders`.
+ *  - No `anthropic-version` is invented for a Claude request: Copilot sends what
+ *    its API expects, and the relay adds nothing.
+ *
+ * Quota is not parsed into the 5h/7d snapshot. Copilot's windows are monthly
+ * (`x-quota-snapshot-chat: …&rem=98.5&rst=2026-11-01T00:00:00Z`), and filing
+ * them under five-hour and seven-day columns would be wrong on the dashboard.
+ */
+const relayAll = (): boolean => true;
+const copilotRequestId = (h: Headers): string | null =>
+  h.get("x-github-request-id") ?? h.get("x-request-id");
+
+export const COPILOT_ANTHROPIC_WIRE: WireProfile = {
+  ...ANTHROPIC_WIRE,
+  defaultAnthropicVersion: false,
+  downstreamAllow: relayAll,
+  parseRateLimit: () => null,
+  upstreamRequestId: copilotRequestId,
+};
+
+export const COPILOT_RESPONSES_WIRE: WireProfile = {
+  ...OPENAI_RESPONSES_WIRE,
+  downstreamAllow: relayAll,
+  parseRateLimit: () => null,
+  upstreamRequestId: copilotRequestId,
+};
+
+/** A Chat Completions stream reports a failure as a bare `error` chunk. */
+function chatSseErrorFrame(type: AnthropicErrorType, message: string): string {
+  return `data: ${JSON.stringify({ error: { type, message } })}\n\n`;
+}
+
+export const COPILOT_CHAT_WIRE: WireProfile = {
+  id: "openai-chat",
+  usageEventTypes: CHAT_USAGE_EVENT_TYPES,
+  createAccumulator: createChatAccumulator,
+  usageFromJson: chatUsageFromJson,
+  errorBody: openaiError,
+  sseErrorFrame: chatSseErrorFrame,
+  defaultAnthropicVersion: false,
+  downstreamAllow: relayAll,
+  parseRateLimit: () => null,
+  upstreamRequestId: copilotRequestId,
 };

@@ -33,11 +33,12 @@
  *                                     run `codex` through Fest on its own login:
  *                                     a ChatGPT login's plan pays, or an API key's
  *                                     owner. `key` forces API-key mode.
- *   fest copilot [gw|openai] [-- copilot args...]
- *                                     run Copilot CLI in BYOK mode with Fest as
- *                                     the provider, on your ANTHROPIC_API_KEY
- *                                     (`gw`: gateway routes; `openai`: your
- *                                     OPENAI_API_KEY). Never your Copilot seat.
+ *   fest copilot [anthropic|gw|openai] [-- copilot args...]
+ *                                     run Copilot CLI through Fest on its own
+ *                                     login: your Copilot plan pays. The modes
+ *                                     are BYOK instead: `anthropic` on your
+ *                                     ANTHROPIC_API_KEY, `gw` on gateway routes,
+ *                                     `openai` on your OPENAI_API_KEY.
  *   fest logout                       forget the local login
  */
 
@@ -561,9 +562,10 @@ function printHelp(): void {
       "  fest whoami\n" +
       "  fest claude [gw] [-- claude args...]   (gw: force org credentials + gateway models)\n" +
       "  fest codex [key] [-- codex args...]    (key: force API-key mode over a ChatGPT login)\n" +
-      "  fest copilot [gw|openai] [-- copilot args...]\n" +
-      "                                         (Copilot CLI BYOK on your ANTHROPIC_API_KEY;\n" +
-      "                                          gw: gateway routes, openai: your OPENAI_API_KEY)\n" +
+      "  fest copilot [anthropic|gw|openai] [-- copilot args...]\n" +
+      "                                         (Copilot CLI on your Copilot plan; BYOK instead with\n" +
+      "                                          anthropic: your ANTHROPIC_API_KEY, gw: gateway routes,\n" +
+      "                                          openai: your OPENAI_API_KEY)\n" +
       "  fest logout",
   );
 }
@@ -637,8 +639,8 @@ async function main(): Promise<void> {
         return;
       }
       case "copilot": {
-        const { mode, rest } = modeArgs(argv.slice(1), ["gw", "openai"] as const);
-        await runCopilot(rest, mode ?? "anthropic");
+        const { mode, rest } = modeArgs(argv.slice(1), ["anthropic", "gw", "openai"] as const);
+        await runCopilot(rest, mode ?? "subscription");
         return;
       }
       case "logout":

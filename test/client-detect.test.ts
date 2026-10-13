@@ -40,3 +40,13 @@ test("the session id comes from whichever header the client uses", () => {
   assert.equal(sessionIdOf(CODEX_EXEC), "01a13435-dc2c-7203-95ac-43973bd9e02c");
   assert.equal(sessionIdOf(COPILOT_BYOK), null);
 });
+
+test("Copilot on its own login is recognised by its API's headers, with its session", () => {
+  const headers = {
+    "copilot-integration-id": "copilot-developer-cli",
+    "user-agent": "copilot/1.0.96 (darwin v24.20.0) term/ghostty",
+    "x-client-session-id": "7c8ab512-709c-4e6f-a76e-e65b9984e517",
+  };
+  assert.equal(detectClient(headers), "copilot");
+  assert.equal(sessionIdOf(headers), "7c8ab512-709c-4e6f-a76e-e65b9984e517");
+});

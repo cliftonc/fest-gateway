@@ -22,8 +22,8 @@ duplicates it.
 - `CODEX.md` — Codex CLI through the `/openai` and `/chatgpt` mounts: the two
   ways to pay, how `fest codex` wires a custom provider, and what the captured
   wire looks like.
-- `COPILOT.md` — Copilot CLI in BYOK mode via `fest copilot`, and why its
-  subscription traffic is deliberately not relayed.
+- `COPILOT.md` — Copilot CLI on its own login through the `/copilot` mount,
+  where its GitHub token goes (and does not), and the BYOK modes.
 - `CLI-AUTH.md` — OAuth setup and the `fest login`/`whoami`/`claude`/`codex`/`copilot`/`logout`
   flow end to end.
 - `canary-history.jsonl` — **data, not documentation.** Appended to by

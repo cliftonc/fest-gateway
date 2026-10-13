@@ -187,9 +187,12 @@ kind of persistence.
   goes to `/chatgpt`, an API key to `/openai` (`key` forces the latter). The
   identity token reaches the server in an `X-Fest-Token` header. See
   [CODEX.md](CODEX.md).
-- **`fest copilot [gw|openai] [-- copilot-args...]`** — runs Copilot CLI in
-  BYOK mode with Fest as the provider, on `ANTHROPIC_API_KEY` by default. Never
-  a Copilot seat. See [COPILOT.md](COPILOT.md).
+- **`fest copilot [anthropic|gw|openai] [-- copilot-args...]`** — runs Copilot
+  CLI on its own login, with `COPILOT_API_URL` pointed at Fest's
+  `/t/<token>/copilot/<plan>` mount: the Copilot plan pays. The plan is read
+  from Copilot's own user cache (`FEST_COPILOT_PLAN` overrides it). The modes
+  are bring-your-own-key instead: `anthropic` on `ANTHROPIC_API_KEY`, `gw` on
+  the gateway's routes, `openai` on `OPENAI_API_KEY`. See [COPILOT.md](COPILOT.md).
 - **`fest logout`** — deletes `~/.fest/config.json` only. It does **not**
   revoke the token server-side; that stays an explicit `fest token revoke
   <id>`, an operator action against the database. Logout here means "forget

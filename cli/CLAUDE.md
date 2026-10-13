@@ -26,9 +26,15 @@ Dispatched from `server/bin/fest.ts`'s `CLIENT_COMMANDS` set, before
   `~/.codex/auth.json` and nothing else in it. The identity token rides in
   `FEST_GATEWAY_TOKEN` via `env_http_headers`, never in argv.
   `buildCodexInvocation` and `detectCodexMode` are pure and tested.
-- `copilot.ts` — spawns `copilot` in BYOK mode (`COPILOT_PROVIDER_*`), after
-  clearing any inherited provider vars. Never relays a Copilot subscription —
-  see `docs/COPILOT.md`. `buildCopilotEnv` is pure and tested.
+- `copilot.ts` — spawns `copilot`. By default on its own login, with
+  `COPILOT_API_URL` at `<fest>/t/<token>/copilot/<plan>`; the plan comes from
+  `endpoints.api` in Copilot's user cache (`copilot-user-cache.json`, read for
+  that one field only) or `FEST_COPILOT_PLAN`. `anthropic`/`gw`/`openai` are
+  BYOK (`COPILOT_PROVIDER_*`). Every mode first clears inherited
+  `COPILOT_PROVIDER_*`, `COPILOT_PROVIDERS_CONFIG`, `COPILOT_API_URL` and
+  `COPILOT_OFFLINE`: any of them would take the session somewhere else.
+  `buildCopilotEnv`, `copilotArgs`, `planFromUserCache` are pure and tested.
+  See `docs/COPILOT.md`.
 - `logout.ts` — deletes the local file only. Never revokes server-side.
 
 ## Maintaining this

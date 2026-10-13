@@ -91,3 +91,19 @@ test("the log scrubber catches a ChatGPT access token, which has no vendor prefi
   assert.equal(line.includes("eyJ"), false);
   assert.match(line, /<redacted>/);
 });
+
+test("GitHub tokens are their own kind, and keep only their family prefix", () => {
+  const secret = "Q7xYv2KpL9mN4rT8wZ3bC6dF1gH5jS0aE2uI";
+  for (const [token, family] of [
+    [`gho_${secret}`, "gho_"],
+    [`ghu_${secret}`, "ghu_"],
+    [`github_pat_11AB${secret}`, "github_pat_"],
+  ] as const) {
+    const info = classifyCredential("authorization", `Bearer ${token}`);
+    assert.equal(info.kind, "GITHUB_TOKEN");
+    assert.equal(info.prefix, family, "no secret characters in the prefix");
+    assert.equal(isSubscriptionCredential(info), false, "the mount decides who pays, not the prefix");
+  }
+  assert.equal(redactSecrets(`token=gho_${secret}`), "token=<redacted>");
+  assert.equal(redactSecrets(`github_pat_11AB${secret}`), "<redacted>");
+});

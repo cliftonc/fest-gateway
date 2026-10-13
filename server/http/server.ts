@@ -38,6 +38,7 @@ import {
   type CodexPaths,
 } from "../pipeline/openai.ts";
 import { OPENAI_RESPONSES_WIRE } from "../pipeline/wire.ts";
+import { handleCopilot, refuseUnknownPlan, relayCopilotMcp, splitCopilotMount } from "../pipeline/copilot.ts";
 import { openaiError } from "./errors.ts";
 import { detectInbound } from "../auth/posture.ts";
 import type { LiveBus } from "../ingest/live-bus.ts";
@@ -245,6 +246,36 @@ export function createServer(deps: ServerDeps): Server {
         if (path === "/v1/models" && (method === "GET" || method === "HEAD")) {
           const inm = req.headers["if-none-match"];
           handleModels(res, routesOf(), Array.isArray(inm) ? inm[0] : inm);
+          return;
+        }
+
+        /**
+         * Copilot CLI on its own Copilot login. A mount like the Codex ones
+         * below, for the same reason: the credential is the caller's, so
+         * routing gets no vote. See `pipeline/copilot.ts`.
+         */
+        const copilot = splitCopilotMount(remainder);
+        if (copilot !== null) {
+          if (deps.config.copilotBaseUrl === null) {
+            refuseDisabled(res, "FEST_COPILOT_BASE_URL");
+            return;
+          }
+          if (copilot.plan === null) {
+            refuseUnknownPlan(res);
+            return;
+          }
+          await handleCopilot(req, res, {
+            ctx: { ...ctx, publicBaseUrl: deps.config.publicUrl },
+            template: deps.config.copilotBaseUrl,
+            plan: copilot.plan,
+            rest: copilot.rest,
+          });
+          return;
+        }
+        // Copilot's built-in GitHub MCP server, which Copilot addresses at the
+        // origin and so arrives here without a token or a plan.
+        if ((path === "/mcp" || path.startsWith("/mcp/")) && deps.config.copilotMcpBaseUrl !== null) {
+          await relayCopilotMcp(req, res, { upstreamBaseUrl: deps.config.copilotMcpBaseUrl, path: remainder });
           return;
         }
 
