@@ -157,6 +157,13 @@ is. `gw` mode goes through the routing table like `fest claude gw`.
   `/responses`), and drops it for MCP (`/mcp/readonly`).
 - It tries `/responses` as a WebSocket upgrade first, and falls back to HTTP
   SSE when refused. Fest refuses it.
+- In interactive sessions (not under `-p`) it gzips request bodies
+  (`content-encoding: gzip`). Fest reads the model and `stream` flag from a
+  decompressed copy and forwards the compressed bytes unchanged. It also treats
+  any `text/event-stream` response as a stream, whatever the body said, so a
+  body it cannot read is never buffered whole.
+- Interactive sessions also post session events to `/agents/sessions/…`. They
+  are relayed and not metered.
 - Headers: `copilot-integration-id: copilot-developer-cli`,
   `editor-version: copilot/<version>`, `x-github-api-version`,
   `x-client-session-id`, `x-interaction-id`, `x-initiator`,

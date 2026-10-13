@@ -24,6 +24,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { createServer } from "../server/http/server.ts";
 import { createUsageSink } from "../server/ingest/sink.ts";
 import { createLiveBus } from "../server/ingest/live-bus.ts";
@@ -39,11 +40,13 @@ import type { UsageRecord } from "../shared/types.ts";
 const GH_SECRET = "Q7xYv2KpL9mN4rT8wZ3bC6dF1gH5jS0aE2uI";
 const GH = `gho_${GH_SECRET}`;
 const SESSION = "7c8ab512-709c-4e6f-a76e-e65b9984e517";
+const GZIPPED_RESPONSES = gzipSync(JSON.stringify({ model: "gpt-6-luna-gz", stream: true }));
 
 interface Seen {
   method: string;
   path: string;
   headers: http.IncomingHttpHeaders;
+  body: Buffer;
 }
 
 const RESPONSES_STREAM =
@@ -62,10 +65,11 @@ const CHAT_STREAM =
 async function mockGitHub(): Promise<{ url: string; seen: Seen[]; close: () => Promise<void> }> {
   const seen: Seen[] = [];
   const server = http.createServer((req, res) => {
-    req.resume();
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
       const path = req.url ?? "";
-      seen.push({ method: req.method ?? "", path, headers: req.headers });
+      seen.push({ method: req.method ?? "", path, headers: req.headers, body: Buffer.concat(chunks) });
       const common = {
         "x-github-request-id": "F07B:254D4E:1A4B2D7",
         "x-quota-snapshot-chat": "crUsed=2&ent=200&rem=98.5&rst=2026-11-01T00%3A00%3A00Z",
@@ -239,6 +243,23 @@ test("Copilot traffic is relayed and metered, and the GitHub token is never kept
     await take("chat", post(`${mount}/chat/completions`, { model: "gpt-4.1", stream: true, stream_options: { include_usage: true } }));
     await take("messages", post(`${mount}/v1/messages`, { model: "claude-sonnet-4.5", max_tokens: 64 }));
     await take("refused", post(`${mount}/v1/messages`, { model: "claude-sonnet-4.5" }, { "x-test": "refuse" }));
+    // Interactive Copilot gzips its bodies; `-p` does not.
+    await take(
+      "gzipResponses",
+      fetch(`${mount}/responses`, {
+        method: "POST",
+        headers: copilotHeaders({ "content-encoding": "gzip" }),
+        body: GZIPPED_RESPONSES,
+      }),
+    );
+    await take(
+      "gzipChat",
+      fetch(`${mount}/chat/completions`, {
+        method: "POST",
+        headers: copilotHeaders({ "content-encoding": "gzip" }),
+        body: gzipSync(JSON.stringify({ model: "gpt-4.1-gz", stream: true })),
+      }),
+    );
     await take("died", post(`${mount}/chat/completions`, { model: "gpt-4.1", stream: true }, { "x-test": "die" }));
     await take("unreachable", post(`${base}/t/${fest}/copilot/business/responses`, { model: "gpt-6-luna", stream: true }));
     await take("unreachableModels", fetch(`${base}/t/${fest}/copilot/business/models`, { headers: copilotHeaders() }));
@@ -267,6 +288,8 @@ test("Copilot traffic is relayed and metered, and the GitHub token is never kept
       "POST /individual/chat/completions",
       "POST /individual/v1/messages",
       "POST /individual/v1/messages",
+      "POST /individual/responses",
+      "POST /individual/chat/completions",
       "POST /individual/chat/completions",
       "POST /mcp/readonly",
     ],
@@ -295,7 +318,7 @@ test("Copilot traffic is relayed and metered, and the GitHub token is never kept
   const rows: readonly UsageRecord[] = sink.recent(50);
   // The model calls, and nothing else: not the model list, `/auto`, MCP, or
   // the requests refused before reaching the relay.
-  assert.equal(rows.length, 6);
+  assert.equal(rows.length, 8);
   for (const r of rows) {
     assert.equal(r.client, "copilot");
     assert.equal(r.posture, "subscription");
@@ -319,6 +342,17 @@ test("Copilot traffic is relayed and metered, and the GitHub token is never kept
   assert.ok(byModel("upstream_error", "claude-sonnet-4.5")?.errorMessage?.startsWith("Bad credentials"));
   assert.equal(byModel("stream_error", "gpt-4.1")?.partial, true);
   assert.ok(byModel("upstream_error", "gpt-6-luna"), "the unreachable upstream is a row too");
+
+  // A gzipped body is read through a copy and forwarded as the bytes it was.
+  const gz = byModel("ok", "gpt-6-luna-gz");
+  assert.ok(gz, "a gzipped body's model is read");
+  assert.equal(gz.stream, true);
+  assert.equal(gz.usage.cacheWrite5mTokens, 14831);
+  const gzChat = byModel("ok", "gpt-4.1-gz");
+  assert.equal(gzChat?.stream, true);
+  assert.equal(gzChat?.usage.outputTokens, 5);
+  const forwarded = upstream.seen.find((s) => s.headers["content-encoding"] === "gzip" && s.path === "/individual/responses");
+  assert.ok(forwarded?.body.equals(GZIPPED_RESPONSES), "the compressed bytes went upstream unchanged");
 
   // ── never kept ───────────────────────────────────────────────────────────
   const leaks = (where: string, text: string) => {

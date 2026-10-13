@@ -229,7 +229,7 @@ export async function handleMessages(
   }
 
   const body = bodyOrTooLarge;
-  const peek = peekRequest(body);
+  const peek = peekRequest(body, headerValue(req, "content-encoding"));
 
   // Key posture with a Fest token and nothing to pay with: the credential
   // position holds our OWN token, which we will not forward, and no route
@@ -293,15 +293,24 @@ export async function handleMessages(
 
   const rateLimit = wire.parseRateLimit(upstream.headers);
   const upstreamRequestId = wire.upstreamRequestId(upstream.headers);
+  /**
+   * A stream is whatever the upstream says it is sending, as well as whatever
+   * the body asked for. The body alone is not enough: one Fest could not read
+   * (compressed, or a shape it does not know) reads as `stream: false`, and a
+   * real stream handled as JSON is buffered whole before the client sees a
+   * byte, then metered at zero because a stream is not a JSON body.
+   */
+  const stream =
+    peek.stream || (upstream.headers.get("content-type") ?? "").toLowerCase().includes("text/event-stream");
   const downstream = buildDownstreamHeaders(upstream.headers, {
-    stream: peek.stream,
+    stream,
     allow: wire.downstreamAllow,
   });
 
   const base = {
     requestedModel: peek.model,
     servedModel: peek.model,
-    stream: peek.stream,
+    stream,
     httpStatus: upstream.status,
     bytesIn: body.byteLength,
     upstreamRequestId,
@@ -383,7 +392,7 @@ export async function handleMessages(
   }
 
   // ── non-streaming ──────────────────────────────────────────────────────────
-  if (!peek.stream || !upstream.body) {
+  if (!stream || !upstream.body) {
     const text = await upstream.text();
     let usage = EMPTY_USAGE;
     try {

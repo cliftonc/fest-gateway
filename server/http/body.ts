@@ -15,6 +15,7 @@
  */
 
 import type { IncomingMessage } from "node:http";
+import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } from "node:zlib";
 
 export interface BodyTooLarge {
   readonly tooLarge: true;
@@ -63,14 +64,54 @@ export interface RequestPeek {
 }
 
 /**
+ * Largest body a compressed request may inflate to before the peek gives up.
+ * The compressed body is already capped by the reader; this caps what a small
+ * hostile one can expand into.
+ */
+const MAX_INFLATED_BYTES = 64 * 1024 * 1024;
+
+/**
+ * A decompressed COPY of a request body, for reading only. The original bytes
+ * are what is forwarded: decoding is for the peek, never for the wire.
+ *
+ * Copilot CLI gzips its request bodies in interactive sessions (not under
+ * `-p`), and a compressed body reads as no model and no stream — rows labelled
+ * "unresolved", and a streamed turn buffered whole and metered at zero.
+ */
+function inflate(bytes: Uint8Array, contentEncoding: string | null): Uint8Array {
+  const encoding = contentEncoding?.trim().toLowerCase() ?? "";
+  if (encoding === "" || encoding === "identity") return bytes;
+  const opts = { maxOutputLength: MAX_INFLATED_BYTES };
+  switch (encoding) {
+    case "gzip":
+    case "x-gzip":
+      return gunzipSync(bytes, opts);
+    case "deflate":
+      return inflateSync(bytes, opts);
+    case "br":
+      return brotliDecompressSync(bytes, opts);
+    case "zstd":
+      return zstdDecompressSync(bytes, opts);
+    default:
+      // Stacked or unknown codings: report less rather than guess.
+      return bytes;
+  }
+}
+
+/**
  * Inspect a body copy for the few fields Fest needs. Tolerant by design: a
  * body we cannot parse is still forwarded verbatim, we just report less about
  * it. Failing a request because our own telemetry could not read it would be
  * the wrong trade.
+ *
+ * `contentEncoding` is the request's `content-encoding`, when the caller wants
+ * a compressed body read. Only the pass-through relay passes it: the routing
+ * dispatcher must not learn the model of a body the substitute path could not
+ * rewrite.
  */
-export function peekRequest(bytes: Uint8Array): RequestPeek {
+export function peekRequest(bytes: Uint8Array, contentEncoding: string | null = null): RequestPeek {
   try {
-    const parsed: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
+    const parsed: unknown = JSON.parse(Buffer.from(inflate(bytes, contentEncoding)).toString("utf8"));
     if (parsed === null || typeof parsed !== "object") {
       return { model: null, stream: false, maxTokens: null };
     }
