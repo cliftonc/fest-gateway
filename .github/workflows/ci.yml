@@ -19,11 +19,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The floor from package.json's engines, and current. The floor is not
-        # decoration: the server is run as TypeScript by Node's native type
-        # stripping, so "which Node" is a correctness question here rather than
-        # a compatibility nicety.
-        node: ["22.18", "24"]
+        # The floor from package.json's engines. The floor is not decoration:
+        # the server is run as TypeScript by Node's native type stripping, and
+        # leans on the SQLite that Node bundles (multi-worker mode needs one
+        # past the WAL-reset fix), so "which Node" is a correctness question
+        # here rather than a compatibility nicety.
+        node: ["26"]
 
     steps:
       - uses: actions/checkout@v5

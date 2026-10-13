@@ -3,7 +3,7 @@
  *
  * ── The synchronous-API constraint, which is load-bearing ────────────────────
  *
- * `node:sqlite`'s `DatabaseSync` is exactly what it says: EVERY statement runs
+ * `node:sqlite`'s `Database` is synchronous: EVERY statement runs
  * on the main thread and blocks the event loop for its full duration. In a
  * process whose day job is relaying long-lived streaming HTTP responses, that
  * is normally disqualifying — a 40ms dashboard aggregate would stall every
@@ -34,6 +34,8 @@
  * process-wide, because doing so would also hide unrelated warnings.
  */
 
+// `DatabaseSync` is a doc-only deprecated alias of `Database` since Node 25
+// (DEP0210). Kept until @types/node declares the new name.
 import { DatabaseSync } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

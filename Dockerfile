@@ -15,7 +15,7 @@
 # injected at run time by compose's `env_file`, so it stays out of the image
 # layers — a secret baked into a layer is readable by anyone who can pull it.
 
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 # Dependencies before source, so an edit to a .ts file does not re-run npm ci.
 COPY package.json package-lock.json ./
@@ -24,7 +24,7 @@ COPY . .
 RUN npm run build
 
 
-FROM node:24-alpine
+FROM node:26-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 

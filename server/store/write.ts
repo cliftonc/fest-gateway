@@ -2,7 +2,7 @@
  * The metering write path.
  *
  * Called from the flush side of the usage queue, never from a proxied request
- * (see the constraint comment in db.ts — `DatabaseSync` blocks the event loop).
+ * (see the constraint comment in db.ts — `node:sqlite` blocks the event loop).
  * One batch is one transaction, and inside it each record writes both its raw
  * `requests` row and its `usage_hourly` rollups, so the rollups can never
  * disagree with the rows they summarise.

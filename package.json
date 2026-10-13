@@ -24,7 +24,7 @@
     "self-hosted"
   ],
   "engines": {
-    "node": ">=22.18"
+    "node": ">=26"
   },
   "bin": {
     "fest": "./dist/server/bin/fest.js"
@@ -62,7 +62,7 @@
     "@tanstack/charts": "^0.18.0",
     "@tanstack/react-query": "^5.103.2",
     "@tanstack/react-virtual": "^3.14.13",
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",

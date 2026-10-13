@@ -5,7 +5,7 @@ Self-hosted Claude Code gateway. See `README.md` for what it does and why.
 ## Build
 
 There is no server build step. Node runs the TypeScript directly (native type
-stripping, Node >= 22.18). Only the dashboard has a build.
+stripping, Node >= 26). Only the dashboard has a build.
 
 ```bash
 npm install          # once

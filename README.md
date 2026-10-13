@@ -348,7 +348,7 @@ per-developer detail.
 
 ## Develop it
 
-Node >= 22.18. There is **no build step for the server** — Node runs the
+Node >= 26. There is **no build step for the server** — Node runs the
 TypeScript directly via native type stripping. Only the dashboard is built, and
 only the published npm package is compiled (Node refuses to strip types under
 `node_modules`).
