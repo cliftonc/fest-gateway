@@ -159,7 +159,9 @@ export function normaliseCatalog(raw: unknown, opts: { source: string; fetchedAt
     // litellm carries a `sample_spec` pseudo-entry documenting its own schema.
     if (key === "sample_spec" || value === null || typeof value !== "object") continue;
     const entry = value as Record<string, unknown>;
-    if (entry["mode"] !== "chat") continue;
+    // `responses` is litellm's mode for models served only on OpenAI's
+    // Responses API — the `*-codex` family — which Codex meters through Fest.
+    if (entry["mode"] !== "chat" && entry["mode"] !== "responses") continue;
 
     const base = tierFrom(entry, "");
     if (base === null) continue;

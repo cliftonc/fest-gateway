@@ -142,6 +142,19 @@ export const ORIGIN_LABELS: Readonly<Record<string, string>> = {
 export const originLabel = (o: string): string => ORIGIN_LABELS[o] ?? o;
 
 /**
+ * The coding agent that sent a request. `""`/null is "could not tell" — which
+ * includes every row from before clients were recorded — and is named as such
+ * rather than guessed to be Claude Code.
+ */
+const CLIENT_LABELS: Readonly<Record<string, string>> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  copilot: "Copilot",
+};
+export const clientLabel = (c: string | null): string =>
+  c === null || c === "" ? "Unknown client" : (CLIENT_LABELS[c] ?? c);
+
+/**
  * A person, as a person.
  *
  * Unattributed usage surfaces as an empty id; it is named, never hidden.

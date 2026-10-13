@@ -26,6 +26,7 @@ import {
   latencySummary,
   latestQuotaByUser,
   listRequests,
+  usageByClient,
   usageByCredentialOrigin,
   usageByModel,
   usageByUser,
@@ -334,6 +335,7 @@ const ENTRYPOINTS: ReadonlyArray<{
   { name: "usageByUser", run: (s, sc, r) => usageByUser(s, sc, r) },
   { name: "usageByModel", run: (s, sc, r) => usageByModel(s, sc, r) },
   { name: "usageByCredentialOrigin", run: (s, sc, r) => usageByCredentialOrigin(s, sc, r) },
+  { name: "usageByClient", run: (s, sc, r) => usageByClient(s, sc, r) },
   { name: "usageSeries", run: (s, sc, r) => usageSeries(s, sc, r) },
   { name: "errorBreakdown", run: (s, sc, r) => errorBreakdown(s, sc, r) },
   { name: "latencySummary", run: (s, sc, r) => latencySummary(s, sc, r) },
@@ -875,4 +877,37 @@ test("the feed SELECT covers every column the row mapper reads", () => {
       `${column} is read by toRequestRow but not selected — it will silently return the column default`,
     );
   }
+});
+
+// ── By client ────────────────────────────────────────────────────────────────
+
+test("usage by client groups each agent, names the unknowns, and scopes members", (t) => {
+  const store = fresh(t);
+  seedOrg(store, ORG_A);
+  seedUser(store, ORG_A, U1, "one@a.test");
+  seedUser(store, ORG_A, U2, "two@a.test");
+  const rows: Array<[string, string | null, string | null, number]> = [
+    ["req_cc1", U1, "claude-code", 100],
+    ["req_cc2", U2, "claude-code", 50],
+    ["req_cx1", U1, "codex", 70],
+    ["req_old", U1, null, 5], // written before clients were recorded
+  ];
+  for (const [id, userId, client, outputTokens] of rows) {
+    seedRequest(store, ORG_A, { id, userId, outputTokens });
+    store.db.prepare("UPDATE requests SET client = ? WHERE id = ?").run(client, id);
+  }
+
+  // Raw rows on BOTH range lengths: the rollup has no client dimension, so a
+  // long range must not silently fall back to it and lose the breakdown.
+  for (const range of [SHORT, LONG]) {
+    const byClient = usageByClient(store, ADMIN, range);
+    assert.deepEqual(
+      byClient.map((r) => [r.client, r.requests, r.usage.outputTokens]),
+      [["claude-code", 2, 150], ["codex", 1, 70], ["", 1, 5]],
+      chooseSource(range),
+    );
+  }
+
+  const mine = usageByClient(store, { orgId: ORG_A, role: "member", userId: U2 }, SHORT);
+  assert.deepEqual(mine.map((r) => [r.client, r.requests]), [["claude-code", 1]]);
 });

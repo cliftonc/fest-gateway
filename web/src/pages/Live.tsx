@@ -33,7 +33,14 @@ import { LiveStats } from "../components/live/LiveStats.tsx";
 import { RollupBoard, type RollupEntry } from "../components/live/RollupBoard.tsx";
 import { DeveloperAvatar } from "../components/live/DeveloperAvatar.tsx";
 import { Badge } from "../components/ui/badge.tsx";
-import { costTotal, modelLabel, notionalTotal, originLabel, personLabel } from "../lib/format.ts";
+import {
+  clientLabel,
+  costTotal,
+  modelLabel,
+  notionalTotal,
+  originLabel,
+  personLabel,
+} from "../lib/format.ts";
 import { useMeasure } from "../hooks/useMeasure.ts";
 import {
   compareByMeasure,
@@ -187,6 +194,24 @@ export function LivePage(): React.JSX.Element {
     });
   }, [events, emailById]);
 
+  const byClient = useMemo<RollupEntry[]>(() => {
+    const m = rollup(events, (e) => e.client);
+    return [...m.entries()].map(([client, v]) => ({
+      key: client === "" ? "unknown" : client,
+      label: (
+        <span
+          className={`truncate text-xs ${client === "" ? "text-muted-foreground" : ""}`}
+          title={client === "" ? "The client could not be told from its headers." : undefined}
+        >
+          {clientLabel(client)}
+        </span>
+      ),
+      requests: v.requests,
+      errors: v.errors,
+      tally: v.tally,
+    }));
+  }, [events]);
+
   /** Ranked top-first: the pulse colours its stack by this order. */
   const rankedModels = useMemo(
     () => [...byModel].sort(compareByMeasure(measure)).map((m) => m.key),
@@ -315,6 +340,12 @@ export function LivePage(): React.JSX.Element {
         <RollupBoard
           title="By user"
           entries={byUser}
+          emptyText="No traffic in this window yet."
+          measure={measure}
+        />
+        <RollupBoard
+          title="By client"
+          entries={byClient}
           emptyText="No traffic in this window yet."
           measure={measure}
         />

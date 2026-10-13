@@ -27,6 +27,18 @@ import { handleModels } from "../api/models.ts";
 import { handleCountTokens } from "../pipeline/count-tokens.ts";
 import { handleMessages } from "../pipeline/passthrough.ts";
 import { splitBedrockMount, refuseUnconfigured } from "../pipeline/bedrock.ts";
+import {
+  CHATGPT_MOUNT,
+  CHATGPT_PATHS,
+  OPENAI_MOUNT,
+  OPENAI_PATHS,
+  handleCodexModels,
+  refuseDisabled,
+  splitMount,
+  type CodexPaths,
+} from "../pipeline/openai.ts";
+import { OPENAI_RESPONSES_WIRE } from "../pipeline/wire.ts";
+import { openaiError } from "./errors.ts";
 import { detectInbound } from "../auth/posture.ts";
 import type { LiveBus } from "../ingest/live-bus.ts";
 import { createStaticHost } from "./static.ts";
@@ -233,6 +245,69 @@ export function createServer(deps: ServerDeps): Server {
         if (path === "/v1/models" && (method === "GET" || method === "HEAD")) {
           const inm = req.headers["if-none-match"];
           handleModels(res, routesOf(), Array.isArray(inm) ? inm[0] : inm);
+          return;
+        }
+
+        /**
+         * Codex, on the developer's own OpenAI key (`/openai`) or ChatGPT login
+         * (`/chatgpt`). Mounts, like Bedrock below, and for the same reason:
+         * routing gets no vote on a "relay on MY credential" path. See
+         * `pipeline/openai.ts`.
+         */
+        const codexMounts: Array<{
+          mount: string;
+          paths: CodexPaths;
+          upstream: string | null;
+          envVar: string;
+          subscription: boolean;
+        }> = [
+          {
+            mount: OPENAI_MOUNT,
+            paths: OPENAI_PATHS,
+            upstream: deps.config.openaiBaseUrl,
+            envVar: "FEST_OPENAI_BASE_URL",
+            subscription: false,
+          },
+          {
+            mount: CHATGPT_MOUNT,
+            paths: CHATGPT_PATHS,
+            upstream: deps.config.chatgptBaseUrl,
+            envVar: "FEST_CHATGPT_BASE_URL",
+            subscription: true,
+          },
+        ];
+        for (const m of codexMounts) {
+          const rest = splitMount(m.mount, remainder);
+          if (rest === null) continue;
+          if (m.upstream === null) {
+            refuseDisabled(res, m.envVar);
+            return;
+          }
+          const restPath = pathnameOf(rest);
+          // `…/responses` and anything beneath it (`…/responses/compact`): every
+          // POST there is model work that bills, so all of it is metered.
+          const isResponses =
+            restPath === m.paths.responses || restPath.startsWith(`${m.paths.responses}/`);
+          if (isResponses && method === "POST") {
+            await handleMessages(req, res, {
+              ...ctx,
+              upstreamBaseUrl: m.upstream,
+              pathOverride: rest,
+              wire: OPENAI_RESPONSES_WIRE,
+              subscriptionMount: m.subscription,
+              // gpt-* ids are filed bare in the catalogue; no hint needed.
+            });
+            return;
+          }
+          if (restPath === m.paths.models && (method === "GET" || method === "HEAD")) {
+            await handleCodexModels(req, res, { upstreamBaseUrl: m.upstream, path: rest });
+            return;
+          }
+          // Anything else under a Codex mount is a path nobody has verified, so
+          // it is refused in Codex's own envelope rather than relayed on a guess.
+          log.warn("unhandled codex path", { method, path });
+          res.writeHead(404, { "content-type": "application/json" });
+          res.end(openaiError("not_found_error", `Fest: ${method} ${path} is not relayed.`));
           return;
         }
 

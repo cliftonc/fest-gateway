@@ -21,6 +21,7 @@ import {
   usageByUser,
   usageByModel,
   usageByCredentialOrigin,
+  usageByClient,
   usageSeries,
   errorBreakdown,
   latencySummary,
@@ -130,6 +131,7 @@ export function handleApi(
         totals: usageTotals(deps.store, scope, range),
         series: usageSeries(deps.store, scope, range),
         byCredentialOrigin: usageByCredentialOrigin(deps.store, scope, range),
+        byClient: usageByClient(deps.store, scope, range),
         latency: latencySummary(deps.store, scope, range),
         sink: deps.sink.stats(),
       } satisfies OverviewResponse);

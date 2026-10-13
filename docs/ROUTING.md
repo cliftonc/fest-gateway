@@ -126,11 +126,11 @@ models most likely to be substituted.
 
 ```jsonc
 { "id": "sonnet-to-kimi", "match": "claude-sonnet-*", "upstream": "fireworks",
-  "model": "accounts/fireworks/models/kimi-k2p7-code",
-  "expose": "claude-kimi-k2-code" }
+  "model": "accounts/fireworks/models/kimi-k3",
+  "expose": "claude-kimi-k3" }
 ```
 
-It appears in the picker as `claude-kimi-k2-code → fireworks`, under "From
+It appears in the picker as `claude-kimi-k3 → fireworks`, under "From
 gateway". The alias must still match `/(claude|anthropic)/i` or the client
 filters it out — Fest rejects one that would not, at boot, because a vanishing
 entry is indistinguishable from a working config.

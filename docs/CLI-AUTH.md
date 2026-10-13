@@ -128,7 +128,7 @@ distinguished by whether that query param was present.
 path, where writing to a shared runner's home directory would be the wrong
 kind of persistence.
 
-## The other three commands
+## The other commands
 
 - **`fest whoami`** — prints what's stored locally, then calls
   `GET /api/auth/identity` (authenticated the same way the proxy path is:
@@ -182,6 +182,14 @@ kind of persistence.
   warns loudly if it finds one. No env manipulation can clear those — the client
   reads its own settings files — so without the warning you would believe you
   were on your own plan while the session was billed elsewhere.
+- **`fest codex [key] [-- codex-args...]`** — runs `codex` with a `fest` model
+  provider defined by `-c` overrides, on Codex's own login: a ChatGPT login
+  goes to `/chatgpt`, an API key to `/openai` (`key` forces the latter). The
+  identity token reaches the server in an `X-Fest-Token` header. See
+  [CODEX.md](CODEX.md).
+- **`fest copilot [gw|openai] [-- copilot-args...]`** — runs Copilot CLI in
+  BYOK mode with Fest as the provider, on `ANTHROPIC_API_KEY` by default. Never
+  a Copilot seat. See [COPILOT.md](COPILOT.md).
 - **`fest logout`** — deletes `~/.fest/config.json` only. It does **not**
   revoke the token server-side; that stays an explicit `fest token revoke
   <id>`, an operator action against the database. Logout here means "forget

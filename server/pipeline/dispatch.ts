@@ -28,6 +28,7 @@ import type { CredentialOrigin } from "../../shared/types.ts";
 import { detectInbound } from "../auth/posture.ts";
 import { isSubscriptionCredential } from "../secret/fingerprint.ts";
 import { readBodyBytes, isTooLarge, peekRequest } from "../http/body.ts";
+import { detectClient, sessionIdOf } from "../http/client.ts";
 import { anthropicError, statusForErrorType } from "../http/errors.ts";
 import {
   resolveRoute,
@@ -135,8 +136,9 @@ export async function dispatchMessages(
     // A server-held credential is org spend, always. This is the field the
     // posture screen keys off.
     credentialOrigin: "fallback_server" as CredentialOrigin,
-    sessionId: headerValue(req, "x-claude-code-session-id"),
+    sessionId: sessionIdOf(req.headers),
     clientVersion: headerValue(req, "user-agent"),
+    client: detectClient(req.headers),
   };
 
   if (!credential.ok) {

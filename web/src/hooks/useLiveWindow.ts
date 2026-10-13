@@ -27,6 +27,8 @@ export interface LiveEvent {
   readonly userId: string | null;
   readonly email: string | null;
   readonly model: string;
+  /** `""` when the client could not be told. */
+  readonly client: string;
   readonly origin: string;
   readonly status: string;
   readonly pipeline: string;
@@ -79,6 +81,7 @@ export function toEvent(row: FeedRowWire): LiveEvent {
     userId: row.userId,
     email: null,
     model: row.servedModel ?? "",
+    client: row.client ?? "",
     origin: row.credentialOrigin,
     status: row.status,
     pipeline: row.pipeline,

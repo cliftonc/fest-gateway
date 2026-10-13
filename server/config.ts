@@ -41,6 +41,20 @@ export interface FestConfig {
    */
   readonly bedrockBaseUrl: string | null;
   /**
+   * Where `/openai/*` (Codex on an API key) is relayed, or null to refuse it.
+   *
+   * ON by default, unlike Bedrock, because there is nothing to choose: there is
+   * one OpenAI API, so a default is the right answer rather than a guess, and
+   * the mount only carries traffic a developer deliberately pointed at it on
+   * their own key. `FEST_OPENAI_BASE_URL=off` switches it off.
+   */
+  readonly openaiBaseUrl: string | null;
+  /**
+   * Where `/chatgpt/*` (Codex on a ChatGPT login) is relayed, or null to refuse
+   * it. On by default for the same reason; `FEST_CHATGPT_BASE_URL=off`.
+   */
+  readonly chatgptBaseUrl: string | null;
+  /**
    * Marks the dashboard session cookie `Secure` and gives it the `__Host-`
    * prefix. Set it whenever Fest is reached over HTTPS — including behind a TLS
    * terminating proxy, where the server itself only ever sees plain HTTP and so
@@ -143,6 +157,27 @@ function stringFromEnv(name: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+/**
+ * A Codex upstream: the default, a URL, or `off`.
+ *
+ * Same https rule as Bedrock, for a stronger reason: on `/chatgpt` the bearer
+ * crossing this hop is the developer's whole ChatGPT account.
+ */
+function codexUpstreamFromEnv(name: string, fallback: string): string | null {
+  const raw = stringFromEnv(name) ?? fallback;
+  if (raw.toLowerCase() === "off") return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${name} is not a valid URL: ${JSON.stringify(raw)}`);
+  }
+  if (parsed.protocol !== "https:" && !["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)) {
+    throw new Error(`${name} must be https (a developer's credential would otherwise cross the network in plaintext)`);
+  }
+  return raw.replace(/\/+$/, "");
+}
+
 function listFromEnv(name: string): readonly string[] {
   const raw = process.env[name];
   if (raw === undefined) return [];
@@ -187,6 +222,9 @@ export function loadConfig(): FestConfig {
     }
   }
 
+  const openai = codexUpstreamFromEnv("FEST_OPENAI_BASE_URL", "https://api.openai.com");
+  const chatgpt = codexUpstreamFromEnv("FEST_CHATGPT_BASE_URL", "https://chatgpt.com");
+
   const port = intFromEnv("FEST_PORT", 8787);
   const host = (process.env.FEST_HOST ?? "127.0.0.1").trim();
   const publicUrl = (stringFromEnv("FEST_PUBLIC_URL") ?? `http://${host}:${port}`).replace(
@@ -204,6 +242,8 @@ export function loadConfig(): FestConfig {
     requireIdentity: boolFromEnv("FEST_REQUIRE_IDENTITY", false),
     routesPath: (process.env.FEST_ROUTES ?? "").trim() || null,
     bedrockBaseUrl: bedrock?.replace(/\/+$/, "") ?? null,
+    openaiBaseUrl: openai,
+    chatgptBaseUrl: chatgpt,
     secureCookies: boolFromEnv("FEST_SECURE_COOKIES", false),
     publicUrl,
     basePath: basePathFrom(stringFromEnv("FEST_BASE_PATH"), publicUrl),

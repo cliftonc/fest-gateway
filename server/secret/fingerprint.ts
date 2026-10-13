@@ -44,6 +44,8 @@ export type CredentialKind =
   | "ANTHROPIC_OTHER"
   | "FIREWORKS_KEY"
   | "FIREPASS_KEY"
+  /** `sk-proj-…`, `sk-svcacct-…` or a legacy `sk-…`: Codex on an API key. */
+  | "OPENAI_API_KEY"
   | "FEST_IDENTITY_TOKEN"
   | "EMPTY"
   | "UNKNOWN";
@@ -87,6 +89,8 @@ export function classifyCredential(header: string, rawValue: string): Credential
   else if (token.startsWith("fw_")) kind = "FIREWORKS_KEY";
   else if (token.startsWith("fpk_")) kind = "FIREPASS_KEY";
   else if (token.startsWith("fest_")) kind = "FEST_IDENTITY_TOKEN";
+  // After every `sk-ant-` case, so an Anthropic key can never land here.
+  else if (token.startsWith("sk-")) kind = "OPENAI_API_KEY";
 
   return {
     header,
@@ -110,8 +114,16 @@ export function isSubscriptionCredential(info: CredentialInfo): boolean {
 const SECRET_PATTERN =
   /\b(?:sk-ant|sk|pk|ghp|gho|ghs|ghu|github_pat|xox[bpoars]|fw|fpk|fest)[-_][\w-]{8,}\b/gi;
 
+/**
+ * A JWT: three base64url segments, the first an encoded `{"alg":…}` header, so
+ * it always starts `eyJ`. A ChatGPT login's access token is one, and it is a
+ * bearer for the developer's whole ChatGPT account — and, having no vendor
+ * prefix, it slips past `SECRET_PATTERN`.
+ */
+const JWT_PATTERN = /\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]*/g;
+
 export function redactSecrets(text: string): string {
-  return text.replace(SECRET_PATTERN, "<redacted>");
+  return text.replace(SECRET_PATTERN, "<redacted>").replace(JWT_PATTERN, "<redacted>");
 }
 
 /**

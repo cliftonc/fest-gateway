@@ -120,6 +120,16 @@ of input, a 5-minute cache write ~125%, a 1-hour write ~200%. Folding cache
 reads into input is an order-of-magnitude error on a cache-heavy agent workload,
 which Claude Code is.
 
+**OpenAI reports input the other way round, and is split on the way in.** Codex's
+`response.completed` gives `input_tokens` *including* `cached_tokens` (and, it
+appears, `cache_write_tokens`). `server/usage/responses.ts` stores the
+remainder as input, the cached part as cache reads and the written part as 5m
+cache writes, so the same disjoint columns and the same pricing code serve both
+vendors. `reasoning_tokens` are already inside `output_tokens` and are not
+counted twice. litellm files the `*-codex` models under `mode: "responses"`
+rather than `chat`, so the catalogue accepts both. The vendored snapshot picks
+them up on the next `npm run prices:sync` or runtime refresh.
+
 **Long-context tiers apply to the whole call.** Sonnet 4.5 doubles above 200k
 tokens; thresholds vary by model (128k, 200k, 256k, 272k and 512k all appear in
 the catalog, so they are parsed from the key name rather than hardcoded). Once

@@ -57,6 +57,7 @@ import {
   notionalTotal,
   num,
   originLabel,
+  clientLabel,
   personLabel,
   ratio,
   relative,
@@ -275,6 +276,59 @@ export function StatsPage({ range }: { range: Range }): React.JSX.Element {
                   next to what the same tokens were worth, and a subscription row
                   shows value against a cost column that reads "subscription".
                 */}
+                <TableCell className="num text-status-sub">{notionalTotal(row)}</TableCell>
+              </TableRow>
+            ))}
+          </Table>
+        </QueryState>
+      </Card>
+
+      <Card
+        title="By client"
+        subtitle="Which coding agent sent the traffic: Claude Code, Codex or Copilot. Read from raw request rows, because the hourly rollup has no client dimension — so this empties for ranges older than raw-row retention."
+      >
+        <QueryState
+          isPending={overview.isPending}
+          error={overview.error}
+          isEmpty={(d?.byClient.length ?? 0) === 0}
+        >
+          <Table
+            head={[
+              "Client",
+              numCol("Requests"),
+              numCol("Errors"),
+              numCol("Tokens"),
+              numCol("Cost"),
+              numCol("At list rates"),
+            ]}
+          >
+            {(d?.byClient ?? []).map((row) => (
+              <TableRow key={row.client}>
+                <TableCell>
+                  {row.client === "" ? (
+                    <Muted title="The client could not be told from its headers, or the row predates client tracking.">
+                      {clientLabel(row.client)}
+                    </Muted>
+                  ) : (
+                    clientLabel(row.client)
+                  )}
+                </TableCell>
+                <TableCell className="num">{num(row.requests)}</TableCell>
+                <TableCell className="num">
+                  {row.errors === 0 ? <Muted>0</Muted> : row.errors}
+                </TableCell>
+                <TableCell className="num">
+                  {tokens(contextTokens(row.usage) + row.usage.outputTokens)}
+                </TableCell>
+                <TableCell className="num">
+                  {row.subscriptionRequests === row.requests ? (
+                    <Muted title="A subscription absorbed every request in this row, so no dollar figure applies.">
+                      subscription
+                    </Muted>
+                  ) : (
+                    costTotal(row)
+                  )}
+                </TableCell>
                 <TableCell className="num text-status-sub">{notionalTotal(row)}</TableCell>
               </TableRow>
             ))}

@@ -60,6 +60,7 @@ export function toLiveRow(rec: UsageRecord): LiveRowWire {
     rl5hUtilization: rec.rateLimit?.fiveHourUtilization ?? null,
     rlClaim: rec.rateLimit?.representativeClaim ?? null,
     clientVersion: rec.clientVersion,
+    client: rec.client ?? null,
     pipeline: rec.pipeline,
     routeId: rec.routeId,
     credentialsConsidered: rec.credentialsConsidered,

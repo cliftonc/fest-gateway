@@ -293,6 +293,7 @@ export interface RequestRow {
   readonly rl5hUtilization: number | null;
   readonly rlClaim: string | null;
   readonly clientVersion: string | null;
+  readonly client: string | null;
   readonly pipeline: string;
   /** Null when no route matched and the default pass-through applied. */
   readonly routeId: string | null;
@@ -346,7 +347,7 @@ const FEED_COLUMNS = `
   r.input_tokens, r.cache_read_tokens, r.cache_write_5m_tokens,
   r.cache_write_1h_tokens, r.output_tokens, r.web_searches, r.service_tier,
   r.cost_usd, r.cost_basis, r.notional_cost_usd, r.ttfb_ms, r.duration_ms,
-  r.rl_5h_utilization, r.rl_claim, r.client_version,
+  r.rl_5h_utilization, r.rl_claim, r.client_version, r.client,
   r.pipeline, r.route_id, r.credentials_considered`;
 
 /**
@@ -443,6 +444,7 @@ function toRequestRow(row: Row): RequestRow {
     rl5hUtilization: numOrNull(row["rl_5h_utilization"]),
     rlClaim: strOrNull(row["rl_claim"]),
     clientVersion: strOrNull(row["client_version"]),
+    client: strOrNull(row["client"]),
     pipeline: str(row["pipeline"], "passthrough"),
     routeId: strOrNull(row["route_id"]),
     // Stored as JSON because it is an audit note read whole. A row written
@@ -861,6 +863,36 @@ export function usageByCredentialOrigin(
     .all(...slice.params, ...time.params) as Row[];
   for (const row of countRows) counts.set(str(row["credential_origin"]), num(row["distinct_users"]));
   return rows.map((row) => ({ ...row, distinctUsers: counts.get(row.credentialOrigin) ?? 0 }));
+}
+
+/**
+ * Per-client totals: Claude Code, Codex, Copilot.
+ *
+ * Always reads raw `requests`, like `errorBreakdown`: the hourly rollup has no
+ * client dimension, and adding one would multiply every cube row by the client
+ * count to answer one panel. So this goes blank once retention removes the raw
+ * rows for a range, and the panel says so — a breakdown we cannot compute is not
+ * approximated from another one.
+ *
+ * `client: ""` is every row whose client could not be told, which includes all
+ * rows written before migration 006. They are shown, not dropped or guessed at.
+ */
+export function usageByClient(
+  store: Store,
+  scope: Scope,
+  range: TimeRange,
+): Array<{ client: string } & UsageTotals> {
+  const scoped = scopeClause(scope, "r");
+  const time = rawRange(range);
+  const sql = `SELECT COALESCE(r.client, '') AS client, ${RAW_AGG}
+    FROM requests r
+    WHERE ${scoped.sql} AND ${time.sql}
+    GROUP BY COALESCE(r.client, '')
+    ORDER BY requests DESC, COALESCE(r.client, '') = '' ASC, COALESCE(r.client, '') ASC`;
+  return (store.db.prepare(sql).all(...scoped.params, ...time.params) as Row[]).map((row) => ({
+    client: str(row["client"]),
+    ...toTotals(row),
+  }));
 }
 
 /**

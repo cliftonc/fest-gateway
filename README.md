@@ -51,7 +51,15 @@ Other commands:
 fest whoami     # what's logged in, and whether the token is still live
 fest logout     # forget the local token (does not revoke it server-side)
 fest claude gw  # force org credentials + the gateway's extra models
+fest codex      # OpenAI Codex CLI, on its own ChatGPT login or API key
+fest copilot    # GitHub Copilot CLI in BYOK mode, on your ANTHROPIC_API_KEY
 ```
+
+Codex and Copilot CLI are metered into the same dashboard, labelled by client.
+Codex on a ChatGPT login is relayed the way a Claude subscription is: your plan
+pays. Copilot runs only in its bring-your-own-key mode, so a model key pays, never
+the Copilot seat. See [docs/CODEX.md](docs/CODEX.md) and
+[docs/COPILOT.md](docs/COPILOT.md).
 
 Without installing anything, `npx fest-gateway login …` does the same job.
 
@@ -124,6 +132,7 @@ docker compose run --rm fest token list | token revoke <id>
 | `FEST_ROUTES` | routing table path. Absent means everything passes through. See [docs/ROUTING.md](docs/ROUTING.md). |
 | `FEST_UPSTREAM_BASE_URL`, `FEST_LOG_LEVEL` | |
 | `FEST_BEDROCK_BASE_URL` | opens the `/bedrock` mount, relaying Claude-in-Bedrock traffic on the *caller's* AWS credential. Must include Bedrock's `/anthropic` segment. Unset means the mount refuses. |
+| `FEST_OPENAI_BASE_URL`, `FEST_CHATGPT_BASE_URL` | where the `/openai` (Codex on an API key) and `/chatgpt` (Codex on a ChatGPT login) mounts relay. Default `https://api.openai.com` and `https://chatgpt.com`; `off` refuses. See [docs/CODEX.md](docs/CODEX.md). |
 | `FEST_PRICING_REFRESH` | set `0` to never fetch prices. Rates then come only from the vendored snapshot, which is always sufficient. |
 | `FEST_PRICING_URL` | internal mirror of litellm's price file. |
 | `FEST_PUBLIC_URL` | base URL Fest is reachable at. Builds the OAuth redirect URI, and its path sets the mount point. Defaults to `http://<host>:<port>`. |
@@ -384,6 +393,8 @@ inside it — read the relevant one before working there.
 | [CLI-AUTH.md](docs/CLI-AUTH.md) | OAuth setup and the `fest login` flow end to end |
 | [ROUTING.md](docs/ROUTING.md) | the routing table format and the substitute path |
 | [PRICING.md](docs/PRICING.md) | where rates come from, and spend vs. value |
+| [CODEX.md](docs/CODEX.md) | Codex CLI through the `/openai` and `/chatgpt` mounts |
+| [COPILOT.md](docs/COPILOT.md) | Copilot CLI in BYOK mode, and why not its subscription |
 | [POSTURES.md](docs/POSTURES.md) | subscription vs. key posture |
 | [CANARY.md](docs/CANARY.md) | the version-upgrade gate |
 | [PHASE0.md](docs/PHASE0.md) · [PHASE0-RESULTS.md](docs/PHASE0-RESULTS.md) | the gating experiment, and what it found |

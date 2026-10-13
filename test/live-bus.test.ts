@@ -153,6 +153,7 @@ test("the live row projects only the fields the dashboard renders", () => {
   // added here deliberately — which is the point of this assertion.
   const keys = Object.keys(row).sort();
   assert.deepEqual(keys, [
+    "client",
     "clientVersion",
     "costBasis",
     "costUsd",

@@ -165,3 +165,28 @@ export function describeUpstreamFailure(status: number, text: string): UpstreamF
 export function sseErrorEvent(type: AnthropicErrorType, message: string): string {
   return `event: error\ndata: ${anthropicError(type, message)}\n\n`;
 }
+
+/**
+ * The same refusal in OpenAI's envelope, for the `/openai` and `/chatgpt`
+ * mounts. Codex parses `error.message` out of this shape and shows it to the
+ * developer, so the message carries the same weight it does for Claude Code.
+ * The Anthropic type names are reused as-is: they are descriptive, and OpenAI
+ * itself uses `invalid_request_error` for the common case.
+ */
+export function openaiError(type: AnthropicErrorType, message: string): string {
+  return JSON.stringify({ error: { message, type, param: null, code: null } });
+}
+
+/**
+ * A terminal `response.failed` frame, for an upstream that dies mid-stream on a
+ * Responses wire. Codex treats it as the end of the turn and surfaces the
+ * message, where a bare truncation would read as a dropped connection and be
+ * retried.
+ */
+export function openaiSseErrorEvent(type: AnthropicErrorType, message: string): string {
+  const data = JSON.stringify({
+    type: "response.failed",
+    response: { status: "failed", error: { code: type, message } },
+  });
+  return `event: response.failed\ndata: ${data}\n\n`;
+}

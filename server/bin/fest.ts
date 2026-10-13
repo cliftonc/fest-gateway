@@ -29,6 +29,15 @@
  *                                     login pays if you have one, org credentials
  *                                     if you do not. `gw` forces org credentials
  *                                     and the gateway model menu.
+ *   fest codex [key] [-- codex args...]
+ *                                     run `codex` through Fest on its own login:
+ *                                     a ChatGPT login's plan pays, or an API key's
+ *                                     owner. `key` forces API-key mode.
+ *   fest copilot [gw|openai] [-- copilot args...]
+ *                                     run Copilot CLI in BYOK mode with Fest as
+ *                                     the provider, on your ANTHROPIC_API_KEY
+ *                                     (`gw`: gateway routes; `openai`: your
+ *                                     OPENAI_API_KEY). Never your Copilot seat.
  *   fest logout                       forget the local login
  */
 
@@ -60,6 +69,8 @@ import { readFile } from "node:fs/promises";
 import { runLogin } from "../../cli/login.ts";
 import { runWhoami } from "../../cli/whoami.ts";
 import { runClaude } from "../../cli/claude.ts";
+import { runCodex } from "../../cli/codex.ts";
+import { runCopilot } from "../../cli/copilot.ts";
 import { runLogout } from "../../cli/logout.ts";
 import { readCliConfig } from "../../cli/config.ts";
 
@@ -549,6 +560,10 @@ function printHelp(): void {
       "  fest login [--provider google|github] [--server <url>]\n" +
       "  fest whoami\n" +
       "  fest claude [gw] [-- claude args...]   (gw: force org credentials + gateway models)\n" +
+      "  fest codex [key] [-- codex args...]    (key: force API-key mode over a ChatGPT login)\n" +
+      "  fest copilot [gw|openai] [-- copilot args...]\n" +
+      "                                         (Copilot CLI BYOK on your ANTHROPIC_API_KEY;\n" +
+      "                                          gw: gateway routes, openai: your OPENAI_API_KEY)\n" +
       "  fest logout",
   );
 }
@@ -573,7 +588,22 @@ async function cmdLogin(argv: readonly string[]): Promise<void> {
  * `loadConfig()` is ever called: a laptop has no reason to have any FEST_*
  * server env var set, and these commands must not imply otherwise.
  */
-const CLIENT_COMMANDS = new Set(["login", "whoami", "claude", "logout"]);
+const CLIENT_COMMANDS = new Set(["login", "whoami", "claude", "codex", "copilot", "logout"]);
+
+/**
+ * Peel an optional mode word off a client command's args, then a conventional
+ * leading `--`. Only before `--`: `fest codex -- key` forwards `key`.
+ */
+function modeArgs<M extends string>(argv: readonly string[], modes: readonly M[]): { mode: M | null; rest: string[] } {
+  let rest = [...argv];
+  let mode: M | null = null;
+  if (rest[0] !== undefined && (modes as readonly string[]).includes(rest[0])) {
+    mode = rest[0] as M;
+    rest = rest.slice(1);
+  }
+  if (rest[0] === "--") rest = rest.slice(1);
+  return { mode, rest };
+}
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -599,6 +629,16 @@ async function main(): Promise<void> {
         // than forwarded.
         if (claudeArgs[0] === "--") claudeArgs = claudeArgs.slice(1);
         await runClaude(claudeArgs, posture);
+        return;
+      }
+      case "codex": {
+        const { mode, rest } = modeArgs(argv.slice(1), ["key"] as const);
+        await runCodex(rest, mode ?? "auto");
+        return;
+      }
+      case "copilot": {
+        const { mode, rest } = modeArgs(argv.slice(1), ["gw", "openai"] as const);
+        await runCopilot(rest, mode ?? "anthropic");
         return;
       }
       case "logout":

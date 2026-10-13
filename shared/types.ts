@@ -230,7 +230,10 @@ export interface UsageRecord {
   readonly credentialFingerprint: string | null;
   readonly credentialOrigin: CredentialOrigin;
 
-  /** Claude Code's own session id, from `x-claude-code-session-id`. */
+  /**
+   * The client's own session id: `x-claude-code-session-id` from Claude Code,
+   * `session-id` from Codex. Copilot CLI sends none.
+   */
   readonly sessionId: string | null;
 
   readonly requestedModel: string | null;
@@ -271,6 +274,13 @@ export interface UsageRecord {
   readonly rateLimit: RateLimitSnapshot | null;
 
   readonly clientVersion: string | null;
+  /**
+   * Which coding agent sent it — see `server/http/client.ts`. Best-effort
+   * labelling from caller-controlled headers, so null is "could not tell", and
+   * it is never used to decide anything. Optional so a record built before
+   * this field existed (or by a test) still type-checks.
+   */
+  readonly client?: string | null | undefined;
 
   readonly pipeline: Pipeline;
   /**

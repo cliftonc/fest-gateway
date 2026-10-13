@@ -28,6 +28,12 @@ export interface UsageAccumulator {
   sawUsage(): boolean;
   /** The error surfaced by an SSE `error` event, if any. */
   streamError(): { type: string; message: string } | null;
+  /**
+   * Whether the wire's terminal event has arrived, so the turn is over whatever
+   * the connection does next. Optional: the Anthropic accumulator does not
+   * implement it, because Claude Code reads its streams to the end.
+   */
+  sawTerminal?(): boolean;
 }
 
 /** Mutable mirror of UsagePayload, which is deliberately readonly. */
@@ -57,14 +63,14 @@ interface Draft {
  * hide that. `Number("")` is 0 and `Number("abc")` is NaN, so string coercion
  * also turns junk into plausible-looking zeroes.
  */
-function num(value: unknown): number | undefined {
+export function num(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
   if (!Number.isFinite(value)) return undefined; // NaN, Infinity, -Infinity
   if (value < 0) return undefined;
   return value;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   // typeof null === "object", and arrays are objects too. Neither is a usage
   // block, and treating them as one yields undefined lookups rather than throws.
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
@@ -145,7 +151,7 @@ function mergeUsage(draft: Draft, usage: Record<string, unknown>): boolean {
   return seen;
 }
 
-function parse(data: string): unknown {
+export function parse(data: string): unknown {
   try {
     return JSON.parse(data) as unknown;
   } catch {

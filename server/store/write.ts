@@ -90,7 +90,7 @@ INSERT INTO requests (
   rl_status, rl_5h_utilization, rl_5h_status, rl_5h_reset_at,
   rl_7d_utilization, rl_7d_status, rl_7d_reset_at,
   rl_claim, rl_overage_status, rl_overage_reason,
-  client_version,
+  client_version, client,
   pipeline, route_id, credentials_considered
 ) VALUES (
   :id, :org_id, :user_id, :token_id,
@@ -107,7 +107,7 @@ INSERT INTO requests (
   :rl_status, :rl_5h_utilization, :rl_5h_status, :rl_5h_reset_at,
   :rl_7d_utilization, :rl_7d_status, :rl_7d_reset_at,
   :rl_claim, :rl_overage_status, :rl_overage_reason,
-  :client_version,
+  :client_version, :client,
   :pipeline, :route_id, :credentials_considered
 )`;
 
@@ -221,6 +221,7 @@ function requestParams(orgId: string, record: UsageRecord): Params {
     rl_overage_status: nullable(rl?.overageStatus),
     rl_overage_reason: nullable(rl?.overageDisabledReason),
     client_version: nullable(record.clientVersion),
+    client: nullable(record.client),
     pipeline: record.pipeline,
     route_id: nullable(record.routeId),
     // Serialised here rather than in the request path: the array is small, but

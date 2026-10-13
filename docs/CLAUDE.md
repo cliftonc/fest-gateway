@@ -19,7 +19,12 @@ duplicates it.
 - `CLIENT-GATEWAY-PROTOCOL.md` — the wire-level details of what Claude Code
   actually sends (headers, quota, model menu format).
 - `FRONTEND.md` — the dashboard's screens and data flow.
-- `CLI-AUTH.md` — OAuth setup and the `fest login`/`whoami`/`claude`/`logout`
+- `CODEX.md` — Codex CLI through the `/openai` and `/chatgpt` mounts: the two
+  ways to pay, how `fest codex` wires a custom provider, and what the captured
+  wire looks like.
+- `COPILOT.md` — Copilot CLI in BYOK mode via `fest copilot`, and why its
+  subscription traffic is deliberately not relayed.
+- `CLI-AUTH.md` — OAuth setup and the `fest login`/`whoami`/`claude`/`codex`/`copilot`/`logout`
   flow end to end.
 - `canary-history.jsonl` — **data, not documentation.** Appended to by
   `npm run canary`; don't hand-edit it, don't treat it as something to keep

@@ -76,3 +76,18 @@ test("log scrubber catches secrets that escape structured redaction", () => {
   // Ordinary text must survive untouched.
   assert.equal(redactSecrets("model claude-opus-5 ok"), "model claude-opus-5 ok");
 });
+
+test("an OpenAI key is its own family, and never swallows an Anthropic one", () => {
+  for (const key of ["sk-proj-abc123def456", "sk-svcacct-abc123def456", "sk-abc123def456ghi"]) {
+    assert.equal(classifyCredential("authorization", `Bearer ${key}`).kind, "OPENAI_API_KEY", key);
+  }
+  assert.equal(classifyCredential("x-api-key", "sk-ant-api03-abc").kind, "ANTHROPIC_API_KEY");
+  assert.equal(classifyCredential("authorization", "Bearer sk-ant-oat01-abc").kind, "ANTHROPIC_OAUTH_SUBSCRIPTION");
+});
+
+test("the log scrubber catches a ChatGPT access token, which has no vendor prefix", () => {
+  const jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLWNvZGV4In0.c2lnbmF0dXJlLWJ5dGVz";
+  const line = redactSecrets(`upstream said: bad token ${jwt} for account`);
+  assert.equal(line.includes("eyJ"), false);
+  assert.match(line, /<redacted>/);
+});

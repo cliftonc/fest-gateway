@@ -8,7 +8,8 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
 
 - **`bin/fest.ts`** — the CLI entrypoint. Server-operator commands (`serve`,
   `migrate`, `token`, `admin`, `seed`) load `FestConfig` via `loadConfig()`;
-  developer commands (`login`, `whoami`, `claude`, `logout`) dispatch to
+  developer commands (`login`, `whoami`, `claude`, `codex`, `copilot`,
+  `logout`) dispatch to
   `cli/` *before* that call, and must stay that way — a laptop has no reason
   to have any `FEST_*` server env var set.
 - **`http/`** — the raw HTTP layer. `server.ts` is a single manual
@@ -24,7 +25,12 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   `count-tokens.ts` handles `/v1/messages/count_tokens`; `bedrock.ts` is the
   `/bedrock` mount, which relays Claude-in-Bedrock traffic on the CALLER's own
   AWS bearer and deliberately bypasses routing (a rule must never be able to
-  substitute a server-held key there).
+  substitute a server-held key there). `openai.ts` is the same idea for Codex:
+  `/openai` (API key → api.openai.com) and `/chatgpt` (ChatGPT login →
+  chatgpt.com, recorded as a subscription). `wire.ts` holds the per-API
+  differences the relay needs — usage events, error envelope, quota headers —
+  so `passthrough.ts` serves both the Anthropic and the OpenAI Responses wire
+  without forking.
 - **`adapters/`** — per-provider substitute-path adapters (`anthropic.ts`,
   `fireworks.ts`). An adapter is a credential + model-id swap, not a wire
   translator — Fireworks serves an Anthropic-compatible `/v1/messages`, so
@@ -56,7 +62,9 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   `userId`), `tokens.ts` (identity tokens), `bootstrap.ts` (`ensureOrg`/
   `ensureUser`, idempotent), `audit.ts`, `retention.ts`, `seed.ts`.
 - **`usage/`** — `accumulator.ts` (SSE usage events, last-wins on
-  `output_tokens`, never summed), `cost.ts` (null-propagating cost algebra —
+  `output_tokens`, never summed), `responses.ts` (the same for OpenAI's
+  Responses API, splitting cached tokens out of `input_tokens`), `cost.ts`
+  (null-propagating cost algebra —
   `null` means unavailable, never zero), `pricing.ts` (prices one call, and
   returns BOTH org spend and notional list-rate value), `prices/` (the vendored
   litellm catalog, its lookup table and its background refresh). Boot loads the

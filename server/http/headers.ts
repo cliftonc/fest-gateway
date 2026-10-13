@@ -17,6 +17,12 @@ export interface UpstreamHeaderOptions {
   readonly upstreamHost: string;
   /** Force `accept-encoding: identity` so the SSE stream can be teed. */
   readonly forceIdentityEncoding?: boolean;
+  /**
+   * Add `anthropic-version` when the client omitted it. On by default; off for
+   * the OpenAI mounts, where an Anthropic header is noise at best and, on a
+   * ChatGPT bearer, more request shape for the upstream to object to.
+   */
+  readonly defaultAnthropicVersion?: boolean;
 }
 
 /** Default when the client omits it entirely. Never an override. */
@@ -75,7 +81,9 @@ export function buildUpstreamHeaders(
   // `host` is hop-by-hop above, so it is re-set here for the real upstream.
   out.set("host", opts.upstreamHost);
 
-  if (!sawAnthropicVersion) out.set("anthropic-version", DEFAULT_ANTHROPIC_VERSION);
+  if (!sawAnthropicVersion && opts.defaultAnthropicVersion !== false) {
+    out.set("anthropic-version", DEFAULT_ANTHROPIC_VERSION);
+  }
 
   // Metering tees the SSE stream to count tokens; a gzip/zstd-framed body would
   // have to be inflated first, which means buffering a stream whose whole point
@@ -102,7 +110,15 @@ const DOWNSTREAM_ALLOW: ReadonlySet<string> = new Set([
 
 export function buildDownstreamHeaders(
   upstream: Headers,
-  opts: { stream: boolean },
+  opts: {
+    stream: boolean;
+    /**
+     * Headers a non-Anthropic wire's client reads, beyond the common allowlist.
+     * Codex, for one, echoes `x-codex-turn-state` back on its next request to
+     * stay on the same backend, and reads `x-codex-*` for its own quota display.
+     */
+    allow?: ((lowerName: string) => boolean) | undefined;
+  },
 ): Record<string, string> {
   const out: Record<string, string> = {};
 
@@ -122,12 +138,17 @@ export function buildDownstreamHeaders(
       out[lower] = value;
       return;
     }
-    if (DOWNSTREAM_ALLOW.has(lower)) out[lower] = value;
+    if (DOWNSTREAM_ALLOW.has(lower) || opts.allow?.(lower) === true) out[lower] = value;
   });
 
   // A non-streaming reply served as `text/plain` makes Claude Code report
   // "empty or malformed response" — it content-type-switches before parsing.
-  if (out["content-type"] === undefined) out["content-type"] = "application/json";
+  //
+  // A stream with no content-type is labelled as one rather than as JSON:
+  // chatgpt.com's Codex backend sends its SSE with no content-type at all.
+  if (out["content-type"] === undefined) {
+    out["content-type"] = opts.stream ? "text/event-stream" : "application/json";
+  }
 
   if (opts.stream) {
     // Any intermediary that buffers turns a token-by-token stream into one
@@ -197,6 +218,45 @@ export function parseRateLimit(upstream: Headers): RateLimitSnapshot | null {
   }
 
   // Nothing recognised — including the case where every value was garbage.
+  if (Object.keys(snapshot).length === 0) return null;
+  return snapshot;
+}
+
+/**
+ * Read Codex's quota headers into the same snapshot.
+ *
+ * chatgpt.com reports two windows on every Codex response, captured from
+ * codex-cli 0.162.1 on a Plus plan:
+ *
+ *   x-codex-primary-used-percent: 2        x-codex-primary-window-minutes: 300
+ *   x-codex-primary-reset-at: 1791895315   (unix seconds)
+ *   x-codex-secondary-used-percent: 0      x-codex-secondary-window-minutes: 10080
+ *
+ * 300 minutes and 10080 minutes are five hours and seven days — the same two
+ * windows Anthropic reports — so they land in the same fields and the same
+ * dashboard columns. Percent becomes a fraction to match Anthropic's
+ * `utilization`. The windows are mapped by role (primary, secondary), not by
+ * their reported length: if a plan ever reports different lengths, the columns
+ * are still "the short window" and "the long one".
+ */
+export function parseCodexRateLimit(upstream: Headers): RateLimitSnapshot | null {
+  const fraction = (raw: string | null): number | undefined => {
+    const n = num(raw);
+    return n === undefined ? undefined : n / 100;
+  };
+  const snapshot: { -readonly [K in keyof RateLimitSnapshot]?: RateLimitSnapshot[K] } = {};
+  const fiveHourUtilization = fraction(upstream.get("x-codex-primary-used-percent"));
+  const fiveHourResetAt = num(upstream.get("x-codex-primary-reset-at"));
+  const sevenDayUtilization = fraction(upstream.get("x-codex-secondary-used-percent"));
+  const sevenDayResetAt = num(upstream.get("x-codex-secondary-reset-at"));
+  // Which limit is binding (`premium`, …) — the closest analogue Codex has to
+  // Anthropic's representative claim.
+  const claim = str(upstream.get("x-codex-active-limit"));
+  if (fiveHourUtilization !== undefined) snapshot.fiveHourUtilization = fiveHourUtilization;
+  if (fiveHourResetAt !== undefined) snapshot.fiveHourResetAt = fiveHourResetAt;
+  if (sevenDayUtilization !== undefined) snapshot.sevenDayUtilization = sevenDayUtilization;
+  if (sevenDayResetAt !== undefined) snapshot.sevenDayResetAt = sevenDayResetAt;
+  if (claim !== undefined) snapshot.representativeClaim = claim;
   if (Object.keys(snapshot).length === 0) return null;
   return snapshot;
 }

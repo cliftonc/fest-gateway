@@ -86,6 +86,8 @@ export interface RequestRowWire {
   readonly rl5hUtilization: number | null;
   readonly rlClaim: string | null;
   readonly clientVersion: string | null;
+  /** `claude-code`, `codex` or `copilot`; null when the client could not be told. */
+  readonly client: string | null;
   /** `passthrough` or `substitute`. */
   readonly pipeline: string;
   /** The route that decided, or null when the default pass-through applied. */
@@ -148,6 +150,12 @@ export interface OverviewResponse {
   readonly byCredentialOrigin: ReadonlyArray<
     { readonly credentialOrigin: string; readonly distinctUsers: number } & UsageTotalsWire
   >;
+  /**
+   * Claude Code / Codex / Copilot. Always from raw rows — the rollup has no
+   * client dimension — so it is empty for ranges older than raw retention.
+   * `client: ""` could not be told, including every row before migration 006.
+   */
+  readonly byClient: ReadonlyArray<{ readonly client: string } & UsageTotalsWire>;
   readonly latency: LatencySummaryWire;
   readonly sink: SinkStatsWire;
 }

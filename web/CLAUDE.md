@@ -38,7 +38,8 @@ step — the server has none.
 ## Maintaining this
 
 - **The Live screen is an aggregate, not a list.** It rolls a moving window up
-  by model, developer and credential origin. A row per request was tried and
+  by model, developer, client (Claude Code / Codex / Copilot) and credential
+  origin. A row per request was tried and
   removed: by the time an operator has read three rows there are twenty more,
   and the per-request detail already lives in the database for the audit trail
   to reach. Resist re-adding a feed table here.

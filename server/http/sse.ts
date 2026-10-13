@@ -38,8 +38,17 @@ const MAX_EVENT_DATA_CHARS = 1024 * 1024;
 
 const DEFAULT_TYPE = "message";
 
-export function createSseParser(opts?: { interestingTypes?: ReadonlySet<string> }): SseParser {
+export function createSseParser(opts?: {
+  interestingTypes?: ReadonlySet<string>;
+  /**
+   * Raise the per-event cap, for a wire whose usage event is large. OpenAI's
+   * `response.completed` carries the whole response object — every output item
+   * plus a per-item token attribution — and a long turn can pass 1MB.
+   */
+  maxEventChars?: number | undefined;
+}): SseParser {
   const interesting = opts?.interestingTypes ?? USAGE_EVENT_TYPES;
+  const maxEventChars = opts?.maxEventChars ?? MAX_EVENT_DATA_CHARS;
   const decoder = new StringDecoder("utf8");
 
   /** Tail of the last chunk that did not end on a newline. */
@@ -114,7 +123,7 @@ export function createSseParser(opts?: { interestingTypes?: ReadonlySet<string> 
     if (field === "data") {
       sawAnyField = true;
       if (dropData) return;
-      if (dataChars + value.length > MAX_EVENT_DATA_CHARS) {
+      if (dataChars + value.length > maxEventChars) {
         // Past the cap we stop retaining. The event is still emitted, and the
         // usage accumulator will reject the truncated JSON on its own.
         dropData = true;

@@ -1,6 +1,7 @@
 # cli/
 
-The developer half of the CLI: `fest login`, `whoami`, `claude`, `logout`.
+The developer half of the CLI: `fest login`, `whoami`, `claude`, `codex`,
+`copilot`, `logout`.
 Dispatched from `server/bin/fest.ts`'s `CLIENT_COMMANDS` set, before
 `loadConfig()` is ever called.
 
@@ -19,6 +20,15 @@ Dispatched from `server/bin/fest.ts`'s `CLIENT_COMMANDS` set, before
   `buildClaudeEnv`, `detectSubscriptionLogin`, `settingsDemotionTriggers`,
   `resolveIntendedModel`, `checkServable` and `postureWarnings` are all pure
   and tested; only `fetchServableModels` and the spawn touch the world.
+- `codex.ts` — spawns `codex` with `-c` overrides defining a `fest` model
+  provider (never edits `~/.codex/config.toml`). ChatGPT login →
+  `/chatgpt/backend-api/codex`, else `/openai/v1`, read from `auth_mode` in
+  `~/.codex/auth.json` and nothing else in it. The identity token rides in
+  `FEST_GATEWAY_TOKEN` via `env_http_headers`, never in argv.
+  `buildCodexInvocation` and `detectCodexMode` are pure and tested.
+- `copilot.ts` — spawns `copilot` in BYOK mode (`COPILOT_PROVIDER_*`), after
+  clearing any inherited provider vars. Never relays a Copilot subscription —
+  see `docs/COPILOT.md`. `buildCopilotEnv` is pure and tested.
 - `logout.ts` — deletes the local file only. Never revokes server-side.
 
 ## Maintaining this

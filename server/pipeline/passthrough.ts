@@ -25,16 +25,12 @@ import type {
 } from "../../shared/types.ts";
 import { EMPTY_USAGE } from "../../shared/types.ts";
 import { detectInbound } from "../auth/posture.ts";
-import { buildUpstreamHeaders, buildDownstreamHeaders, parseRateLimit } from "../http/headers.ts";
-import {
-  anthropicError,
-  statusForErrorType,
-  sseErrorEvent,
-  describeUpstreamFailure,
-} from "../http/errors.ts";
+import { buildUpstreamHeaders, buildDownstreamHeaders } from "../http/headers.ts";
+import { statusForErrorType, describeUpstreamFailure } from "../http/errors.ts";
 import { readBodyBytes, isTooLarge, peekRequest } from "../http/body.ts";
 import { createSseParser } from "../http/sse.ts";
-import { createUsageAccumulator, usageFromJson } from "../usage/accumulator.ts";
+import { detectClient, sessionIdOf } from "../http/client.ts";
+import { ANTHROPIC_WIRE, type WireProfile } from "./wire.ts";
 import { priceUsage } from "../usage/pricing.ts";
 import { pipeWithTee, beginStream } from "../http/pipe.ts";
 import { joinUpstreamUrl } from "../adapters/url.ts";
@@ -51,14 +47,27 @@ export interface PassthroughContext {
   /**
    * Path to request upstream, when it is not the one the client sent.
    *
-   * Set only by the Bedrock mount, which strips its own prefix — the developer
-   * configured `…/bedrock`, and `/bedrock/v1/messages` is not a path any
-   * upstream serves. Nothing else may use this: rewriting the path a caller
-   * asked for is the kind of "helpful" transform the byte-for-byte rule exists
-   * to keep out of this file, and the mount is a Fest-side URL convention
-   * rather than part of the request.
+   * Set only by the mounts (`/bedrock`, `/openai`, `/chatgpt`), which strip
+   * their own prefix — the developer configured `…/bedrock`, and
+   * `/bedrock/v1/messages` is not a path any upstream serves. Nothing else may
+   * use this: rewriting the path a caller asked for is the kind of "helpful"
+   * transform the byte-for-byte rule exists to keep out of this file, and a
+   * mount is a Fest-side URL convention rather than part of the request.
    */
   readonly pathOverride?: string | undefined;
+  /**
+   * The API being relayed. Absent means Anthropic's Messages API, which is
+   * what every caller of this function spoke before the OpenAI mounts.
+   */
+  readonly wire?: WireProfile | undefined;
+  /**
+   * The mount, not the credential's prefix, says this is a subscription.
+   *
+   * Set only by `/chatgpt`: a ChatGPT login's bearer is an opaque JWT with no
+   * family prefix to classify, but the mount it arrived on is the ChatGPT
+   * backend, which serves nothing but plan-billed Codex traffic.
+   */
+  readonly subscriptionMount?: boolean | undefined;
   /**
    * litellm provider key for pricing, when the served ids need one.
    *
@@ -110,21 +119,23 @@ export async function handleMessages(
   const startedAt = Date.now();
   const id = randomUUID();
   const inbound = detectInbound(req.url ?? "/", req.headers);
+  const wire = ctx.wire ?? ANTHROPIC_WIRE;
 
-  const sessionId = headerValue(req, "x-claude-code-session-id");
+  const sessionId = sessionIdOf(req.headers);
   const clientVersion = headerValue(req, "user-agent");
+  const client = detectClient(req.headers);
+
+  // Decided once, here, and used for posture, origin and pricing alike, so the
+  // three can never disagree about who paid.
+  const isSubscription =
+    inbound.upstreamCredential !== null &&
+    (ctx.subscriptionMount === true || isSubscriptionCredential(inbound.upstreamCredential));
+  const posture = isSubscription ? "subscription" : inbound.posture;
 
   const credentialsConsidered: readonly CredentialAttempt[] =
     inbound.upstreamCredential === null
       ? [{ source: "inbound", result: "missing", reason: "no credential on the request" }]
-      : [
-          {
-            source: isSubscriptionCredential(inbound.upstreamCredential)
-              ? "inbound_subscription"
-              : "inbound_key",
-            result: "used",
-          },
-        ];
+      : [{ source: isSubscription ? "inbound_subscription" : "inbound_key", result: "used" }];
 
   // Resolve identity before anything else, but note the two failure modes are
   // NOT the same:
@@ -142,16 +153,13 @@ export async function handleMessages(
       id,
       startedAt,
       endedAt: Date.now(),
-      posture: inbound.posture,
+      posture,
       identityCarrier: inbound.identity.carrier,
       callerFingerprint: inbound.identity.tokenFingerprint,
       userId: resolved?.userId ?? null,
       tokenId: resolved?.tokenId ?? null,
       credentialFingerprint: inbound.upstreamCredential?.fingerprint ?? null,
-      credentialOrigin: credentialOrigin(
-        inbound.upstreamCredential !== null && isSubscriptionCredential(inbound.upstreamCredential),
-        inbound.upstreamCredential !== null && !isSubscriptionCredential(inbound.upstreamCredential),
-      ),
+      credentialOrigin: credentialOrigin(isSubscription, inbound.upstreamCredential !== null && !isSubscription),
       sessionId,
       requestedModel: null,
       servedModel: null,
@@ -170,6 +178,7 @@ export async function handleMessages(
       upstreamRequestId: null,
       rateLimit: null,
       clientVersion,
+      client,
       pipeline: "passthrough",
       routeId: ctx.routeId ?? null,
       // Recorded even though this path never chooses: a record that says
@@ -194,7 +203,7 @@ export async function handleMessages(
     });
     // Claude Code renders error.message to the developer, so this string is
     // the user-facing UI. Write it for a human who is mid-task.
-    res.end(anthropicError(type, message));
+    res.end(wire.errorBody(type, message));
   };
 
   if (presentedToken !== null && resolved === null) {
@@ -215,13 +224,12 @@ export async function handleMessages(
     const type = "invalid_request_error";
     finish({ status: "bad_request", httpStatus: statusForErrorType(type) });
     res.writeHead(statusForErrorType(type), { "content-type": "application/json" });
-    res.end(anthropicError(type, `Fest: request body exceeds ${MAX_BODY_BYTES} bytes.`));
+    res.end(wire.errorBody(type, `Fest: request body exceeds ${MAX_BODY_BYTES} bytes.`));
     return;
   }
 
   const body = bodyOrTooLarge;
   const peek = peekRequest(body);
-  const isSubscription = inbound.upstreamCredential !== null && isSubscriptionCredential(inbound.upstreamCredential);
 
   // Key posture with a Fest token and nothing to pay with: the credential
   // position holds our OWN token, which we will not forward, and no route
@@ -241,7 +249,7 @@ export async function handleMessages(
       "content-type": "application/json",
       "x-should-retry": String(failure.retryable),
     });
-    res.end(anthropicError(failure.type, failure.message));
+    res.end(wire.errorBody(failure.type, failure.message));
     return;
   }
 
@@ -250,8 +258,9 @@ export async function handleMessages(
   // and turns every request into a 404 nobody can read off the config.
   const target = joinUpstreamUrl(ctx.upstreamBaseUrl, ctx.pathOverride ?? inbound.effectivePath);
   const headers = buildUpstreamHeaders(req.headers, {
-    posture: inbound.posture,
+    posture,
     upstreamHost: target.host,
+    defaultAnthropicVersion: wire.defaultAnthropicVersion,
   });
 
   const abort = new AbortController();
@@ -278,14 +287,16 @@ export async function handleMessages(
       errorMessage: String(err).slice(0, 200),
     });
     res.writeHead(statusForErrorType(type), { "content-type": "application/json" });
-    res.end(anthropicError(type, "Fest: upstream request failed."));
+    res.end(wire.errorBody(type, "Fest: upstream request failed."));
     return;
   }
 
-  const rateLimit = parseRateLimit(upstream.headers);
-  const upstreamRequestId =
-    upstream.headers.get("request-id") ?? upstream.headers.get("anthropic-request-id");
-  const downstream = buildDownstreamHeaders(upstream.headers, { stream: peek.stream });
+  const rateLimit = wire.parseRateLimit(upstream.headers);
+  const upstreamRequestId = wire.upstreamRequestId(upstream.headers);
+  const downstream = buildDownstreamHeaders(upstream.headers, {
+    stream: peek.stream,
+    allow: wire.downstreamAllow,
+  });
 
   const base = {
     requestedModel: peek.model,
@@ -319,7 +330,9 @@ export async function handleMessages(
      * failure and is not warned about, or every session would open with an
      * error in the dashboard and a warning in the log.
      */
-    const preflight = isWarmupPreflightRefusal({
+    // Claude Code's warmup ping is an Anthropic-wire phenomenon; nothing on
+    // another wire is that ping, whatever its shape.
+    const preflight = wire.id === "anthropic" && isWarmupPreflightRefusal({
       httpStatus: upstream.status,
       stream: peek.stream,
       maxTokens: peek.maxTokens,
@@ -354,7 +367,10 @@ export async function handleMessages(
     }
     // `stream: false`: whatever the client asked for, this is a JSON error, and
     // framing it as a stream would tell the client to expect SSE it won't get.
-    res.writeHead(upstream.status, buildDownstreamHeaders(upstream.headers, { stream: false }));
+    res.writeHead(
+      upstream.status,
+      buildDownstreamHeaders(upstream.headers, { stream: false, allow: wire.downstreamAllow }),
+    );
     res.end(failure.text);
     finish({
       ...base,
@@ -371,7 +387,7 @@ export async function handleMessages(
     const text = await upstream.text();
     let usage = EMPTY_USAGE;
     try {
-      usage = usageFromJson(JSON.parse(text)) ?? EMPTY_USAGE;
+      usage = wire.usageFromJson(JSON.parse(text)) ?? EMPTY_USAGE;
     } catch {
       // A body we cannot read is still relayed; we just report less.
     }
@@ -391,8 +407,11 @@ export async function handleMessages(
   }
 
   // ── streaming ──────────────────────────────────────────────────────────────
-  const parser = createSseParser();
-  const acc = createUsageAccumulator();
+  const parser = createSseParser({
+    interestingTypes: wire.usageEventTypes,
+    maxEventChars: wire.maxEventChars,
+  });
+  const acc = wire.createAccumulator();
 
   beginStream(res, upstream.status, downstream);
 
@@ -421,8 +440,14 @@ export async function handleMessages(
      * a client abort wins over them: the developer walking away is the more
      * specific fact about what happened.
      */
+    //
+    // A client that hangs up AFTER the terminal event is not walking away: it
+    // has the whole answer. Codex does exactly this — it stops reading at
+    // `response.completed` while chatgpt.com is still holding the stream open —
+    // and counting that as an abort marked every Codex turn a failure.
+    const finished = result.completed || acc.sawTerminal?.() === true;
     let status: RequestStatus = "ok";
-    if (result.clientAborted) status = "client_abort";
+    if (result.clientAborted && !finished) status = "client_abort";
     else if (streamErr) status = "stream_error";
 
     if (!result.clientAborted) res.end();
@@ -432,7 +457,7 @@ export async function handleMessages(
       status,
       // Input tokens were already consumed upstream even on an abort, so the
       // partial usage is real and worth recording — just flagged as incomplete.
-      partial: result.clientAborted || !result.completed,
+      partial: !finished,
       usage,
       costUsd: priced.cost,
       costBasis: priced.basis,
@@ -454,7 +479,7 @@ export async function handleMessages(
     const priced = priceUsage(peek.model, usage, isSubscription, ctx.priceProvider);
     log.warn("upstream stream failed mid-flight", { id, error: String(err).slice(0, 200) });
     if (!res.writableEnded) {
-      res.write(sseErrorEvent("api_error", "Fest: upstream connection closed mid-stream."));
+      res.write(wire.sseErrorFrame("api_error", "Fest: upstream connection closed mid-stream."));
       res.end();
     }
     finish({
