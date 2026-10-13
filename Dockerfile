@@ -53,7 +53,12 @@ ENV FEST_DB=/data/fest.db \
     # mandatory: Fest refuses to serve an unauthenticated dashboard off
     # loopback, so the first run is
     #   docker compose run --rm fest admin create you@corp.test
-    FEST_HOST=0.0.0.0
+    FEST_HOST=0.0.0.0 \
+    # One HTTP worker per CPU this container may use. Node reads the cgroup
+    # limit, so `cpus: 2` in compose means two workers, and a one-CPU
+    # container runs as the plain single process. See README, "More than one
+    # core".
+    FEST_WORKERS=auto
 
 EXPOSE 8787
 

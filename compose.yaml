@@ -33,9 +33,12 @@ services:
       # terminating proxy — the server only sees plain HTTP and cannot work it
       # out for itself. It marks the session cookie Secure and __Host-.
       FEST_SECURE_COOKIES: "0"
-      # HTTP worker processes on this one host; `auto` is one per core. Above 1
-      # the fest-data volume must stay a local disk — SQLite's WAL needs shared
-      # memory across the processes, which no network filesystem provides.
+      # HTTP worker processes. The image defaults to `auto`: one per CPU this
+      # container may use, read from its cgroup limit — so without a `cpus:`
+      # limit below, that is every core on the host. Set a number to pin it,
+      # or "1" for a single process. With more than one, the fest-data volume
+      # must stay a local disk: SQLite's WAL needs shared memory across the
+      # processes, which no network filesystem provides.
       # FEST_WORKERS: "auto"
       # FEST_ROUTES: /config/routes.json
     env_file:

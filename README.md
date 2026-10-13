@@ -132,7 +132,7 @@ docker compose run --rm fest token list | token revoke <id>
 | `FEST_SECURE_COOKIES` | set behind HTTPS. |
 | `FEST_ROUTES` | routing table path. Absent means everything passes through. See [docs/ROUTING.md](docs/ROUTING.md). |
 | `FEST_UPSTREAM_BASE_URL`, `FEST_LOG_LEVEL` | |
-| `FEST_WORKERS` | HTTP worker processes: a number, or `auto` for one per core. Default `1`. See [More than one core](#more-than-one-core). |
+| `FEST_WORKERS` | HTTP worker processes: a number, or `auto` for one per CPU the process may use (a container's CPU limit counts). Default `1`; the Docker image sets `auto`. See [More than one core](#more-than-one-core). |
 | `FEST_BEDROCK_BASE_URL` | opens the `/bedrock` mount, relaying Claude-in-Bedrock traffic on the *caller's* AWS credential. Must include Bedrock's `/anthropic` segment. Unset means the mount refuses. |
 | `FEST_OPENAI_BASE_URL`, `FEST_CHATGPT_BASE_URL` | where the `/openai` (Codex on an API key) and `/chatgpt` (Codex on a ChatGPT login) mounts relay. Default `https://api.openai.com` and `https://chatgpt.com`; `off` refuses. See [docs/CODEX.md](docs/CODEX.md). |
 | `FEST_COPILOT_BASE_URL`, `FEST_COPILOT_MCP_BASE_URL` | where the `/copilot/<plan>` mount (Copilot CLI on its own login) and the root `/mcp` relay (its built-in GitHub MCP server) go. Default `https://api.{plan}.githubcopilot.com` and `https://api.githubcopilot.com`; `off` refuses. See [docs/COPILOT.md](docs/COPILOT.md). |
