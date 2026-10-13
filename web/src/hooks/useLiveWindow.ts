@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FeedRowWire } from "../../../shared/api.ts";
 import { isErrorStatus, type RequestStatus } from "../../../shared/types.ts";
 import { cacheWriteTokens, contextTokens } from "../lib/format.ts";
+import type { TagFilter } from "../../../shared/tags.ts";
 
 export interface LiveEvent {
   readonly id: string;
@@ -40,6 +41,8 @@ export interface LiveEvent {
   readonly cacheWrite: number;
   readonly output: number;
   readonly durationMs: number;
+  /** Declared tags; `{}` when none. */
+  readonly tags: Readonly<Record<string, string>>;
 }
 
 export interface RateBucket {
@@ -92,10 +95,23 @@ export function toEvent(row: FeedRowWire): LiveEvent {
     cacheWrite: cacheWriteTokens(row.usage),
     output: row.usage.outputTokens,
     durationMs: row.durationMs,
+    // Optional on the wire for rows from a gateway older than tags.
+    tags: row.tags ?? {},
   };
 }
 
-export function useLiveWindow(windowMs: number): {
+/** AND of exact matches, as the server applies `tag=` filters. */
+export const matchesTags = (e: LiveEvent, filter: TagFilter): boolean =>
+  Object.entries(filter).every(([k, v]) => e.tags[k] === v);
+
+export function useLiveWindow(
+  windowMs: number,
+  /**
+   * The dashboard's global tag filter. Applied here, before any count, so the
+   * pulse, the headline rate and every board agree on what is in the window.
+   */
+  tags: TagFilter = {},
+): {
   window: LiveWindow;
   add: (rows: readonly FeedRowWire[]) => void;
   seed: (rows: readonly FeedRowWire[]) => void;
@@ -132,7 +148,7 @@ export function useLiveWindow(windowMs: number): {
 
   const win = useMemo<LiveWindow>(() => {
     const cutoff = now - windowMs;
-    const inWindow = events.filter((e) => e.at >= cutoff);
+    const inWindow = events.filter((e) => e.at >= cutoff && matchesTags(e, tags));
 
     const bucketMs = windowMs / BUCKETS;
     const base = Math.floor(now / bucketMs) * bucketMs;
@@ -164,7 +180,7 @@ export function useLiveWindow(windowMs: number): {
       errorRatio: total === 0 ? null : errors / total,
       windowMs,
     };
-  }, [events, now, windowMs]);
+  }, [events, now, windowMs, tags]);
 
   return { window: win, add, seed };
 }

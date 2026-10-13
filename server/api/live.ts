@@ -61,6 +61,7 @@ export function toLiveRow(rec: UsageRecord): LiveRowWire {
     rlClaim: rec.rateLimit?.representativeClaim ?? null,
     clientVersion: rec.clientVersion,
     client: rec.client ?? null,
+    tags: rec.tags ?? {},
     pipeline: rec.pipeline,
     routeId: rec.routeId,
     credentialsConsidered: rec.credentialsConsidered,

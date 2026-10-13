@@ -32,10 +32,13 @@ export const RANGE_OPTIONS: readonly RangeOption[] = [
 
 export const DEFAULT_RANGE_ID = "24h";
 
-export function rangeFor(id: string, now = Date.now()): Range {
+export const RANGE_IDS: readonly string[] = RANGE_OPTIONS.map((o) => o.id);
+
+export function rangeFor(id: string, now = Date.now(), tags?: Range["tags"]): Range {
   const option = RANGE_OPTIONS.find((o) => o.id === id) ?? RANGE_OPTIONS[1];
   const toMs = Math.ceil(now / MINUTE) * MINUTE;
-  return { fromMs: toMs - (option?.ms ?? 24 * 3_600_000), toMs };
+  const fromMs = toMs - (option?.ms ?? 24 * 3_600_000);
+  return tags !== undefined && Object.keys(tags).length > 0 ? { fromMs, toMs, tags } : { fromMs, toMs };
 }
 
 /** True when the server will answer this range from raw rows, not the rollup. */

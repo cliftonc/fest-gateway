@@ -24,7 +24,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { api, type Range } from "../lib/api.ts";
+import { api, rangeKey, type Range } from "../lib/api.ts";
 import { isExactRange } from "../lib/range.ts";
 import {
   Card,
@@ -62,7 +62,7 @@ function explain(errorType: string | null, httpStatus: number | null): string {
 
 export function ErrorsPage({ range }: { range: Range }): React.JSX.Element {
   const errors = useQuery({
-    queryKey: ["errors", range.fromMs, range.toMs],
+    queryKey: ["errors", ...rangeKey(range)],
     queryFn: () => api.errors(range),
   });
 

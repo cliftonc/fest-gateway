@@ -33,6 +33,7 @@ export interface RecordBase {
   readonly sessionId: string | null;
   readonly clientVersion: string | null;
   readonly client?: string | null | undefined;
+  readonly tags?: UsageRecord["tags"];
   readonly routeId: string | null;
   readonly credentialsConsidered: readonly CredentialAttempt[];
 }
@@ -71,6 +72,7 @@ export function buildRecord(
     rateLimit: null,
     clientVersion: base.clientVersion,
     client: base.client ?? null,
+    tags: base.tags,
     pipeline: base.pipeline,
     routeId: base.routeId,
     credentialsConsidered: base.credentialsConsidered,

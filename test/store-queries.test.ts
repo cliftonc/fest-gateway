@@ -29,14 +29,17 @@ import {
   usageByClient,
   usageByCredentialOrigin,
   usageByModel,
+  usageByTag,
   usageByUser,
   usageByUserSql,
   usageSeries,
   usageTotals,
+  tagValues,
   RAW_WINDOW_MS,
   type Scope,
   type TimeRange,
 } from "../server/store/queries.ts";
+import { canonicalTags } from "../shared/tags.ts";
 
 const HOUR = 3_600_000;
 /** A fixed hour boundary, so bucketing is never off by a partial hour. */
@@ -94,6 +97,7 @@ interface Seed {
   readonly rlClaim?: string | null;
   readonly clientVersion?: string | null;
   readonly credentialFingerprint?: string | null;
+  readonly tags?: Record<string, string>;
 }
 
 const INSERT_REQUEST = `INSERT INTO requests (
@@ -103,11 +107,11 @@ const INSERT_REQUEST = `INSERT INTO requests (
   error_type, partial, input_tokens, cache_read_tokens, output_tokens,
   cost_usd, cost_basis, notional_cost_usd, ttfb_ms, duration_ms,
   rl_status, rl_5h_utilization, rl_5h_status, rl_5h_reset_at,
-  rl_7d_utilization, rl_claim, client_version
+  rl_7d_utilization, rl_claim, client_version, tags_json
 ) VALUES (?, ?, ?, ?, ?, 'subscription', 'header', ?, ?, ?, ?, ?, 'api.anthropic.com',
-  0, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  0, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-const KEY_COLS = "org_id, hour_start, user_id, served_model, credential_origin, cost_basis";
+const KEY_COLS = "org_id, hour_start, user_id, served_model, credential_origin, cost_basis, tags";
 const ADD_COLS = [
   "requests",
   "errors",
@@ -191,6 +195,7 @@ function seedRequest(store: Store, orgId: string, s: Seed): void {
       null,
       s.rlClaim ?? null,
       s.clientVersion ?? null,
+      canonicalTags(s.tags) || null,
     );
 
   const bucket = latBucket(durationMs);
@@ -234,6 +239,7 @@ function seedRequest(store: Store, orgId: string, s: Seed): void {
         km,
         credentialOrigin,
         costBasis,
+        canonicalTags(s.tags),
         ...additive,
         durationMs,
       );
@@ -314,6 +320,7 @@ function seedWorld(store: Store): void {
     ttfbMs: 4321,
     rl5h: 0.99,
     rlClaim: "claim_bbb",
+    tags: { team: "team-bbb", project: "project-bbb" },
   });
   seedRequest(store, ORG_B, {
     id: "req_bbb_2",
@@ -340,6 +347,8 @@ const ENTRYPOINTS: ReadonlyArray<{
   { name: "errorBreakdown", run: (s, sc, r) => errorBreakdown(s, sc, r) },
   { name: "latencySummary", run: (s, sc, r) => latencySummary(s, sc, r) },
   { name: "latestQuotaByUser", run: (s, sc) => latestQuotaByUser(s, sc) },
+  { name: "usageByTag", run: (s, sc, r) => usageByTag(s, sc, r, "team") },
+  { name: "tagValues", run: (s, sc, r) => tagValues(s, sc, r) },
 ];
 
 /** Exports that take no `Scope`, so tenancy does not apply to them. */

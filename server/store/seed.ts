@@ -52,6 +52,22 @@ const MODELS = [
 
 const SEED_USERS = ["ada@corp.test", "grace@corp.test", "alan@corp.test"] as const;
 
+const DEMO_TEAMS = ["platform", "data", "platform"] as const;
+const DEMO_PROJECTS = ["fest", "website", "fest", "infra"] as const;
+
+/**
+ * Tags for a demo row, derived from its index and developer rather than drawn
+ * from the PRNG: drawing would shift every later random value, and with it
+ * every number the seed tests pin. A team per developer, a rotating project,
+ * and a slice of untagged traffic so the "none" bucket is visible too.
+ */
+function demoTags(i: number, userIndex: number): Record<string, string> {
+  if (i % 7 === 0) return {};
+  const project = DEMO_PROJECTS[i % DEMO_PROJECTS.length]!;
+  if (userIndex < 0) return { project };
+  return { team: DEMO_TEAMS[userIndex % DEMO_TEAMS.length]!, project };
+}
+
 export interface SeedOptions {
   readonly orgId: string;
   /** User ids to attribute traffic to, in order of decreasing volume. */
@@ -186,6 +202,7 @@ export function generateRecords(opts: SeedOptions): UsageRecord[] {
           }
         : null,
       clientVersion: "2.1.278",
+      tags: demoTags(i, userId === null ? -1 : opts.userIds.indexOf(userId)),
       pipeline: credentialOrigin === "fallback_server" ? "substitute" : "passthrough",
       routeId: credentialOrigin === "fallback_server" ? "demo-substitute" : null,
       credentialsConsidered:

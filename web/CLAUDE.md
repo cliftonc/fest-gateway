@@ -26,7 +26,9 @@ step — the server has none.
   by default only for a reader with no traffic in the last 30 days.
 - `src/lib/` — the non-visual layer: `api.ts` (fetch wrappers typed against
   `shared/api.ts`), `auth.ts` (session calls), `sse.ts` (the live feed),
-  `router.ts`, `range.ts`, `format.ts`, `theme.tsx` (light/dark, class on
+  `router.ts` (pages, plus `useUrlParams`/`setUrlParams` for filter state),
+  `url-state.ts` (the pure hash-query helpers, tested from `test/`),
+  `range.ts`, `format.ts`, `theme.tsx` (light/dark, class on
   `<html>`, pre-painted by an inline script in `index.html`), `colors.ts`
   (status tones resolved for the charts, which take colour values not classes).
 - `src/hooks/` — `useLiveWindow` (the rolling aggregation window behind the
@@ -37,6 +39,9 @@ step — the server has none.
 
 ## Maintaining this
 
+- **Every filter is a URL param, never `useState`** — range, tags, the Live
+  window, the by-tag key. A refresh must reopen the same view. Query keys use
+  `rangeKey(range)`, which includes the tag filter; see `docs/FRONTEND.md`.
 - **The Live screen is an aggregate, not a list.** It rolls a moving window up
   by model, developer, client (Claude Code / Codex / Copilot) and credential
   origin. A row per request was tried and

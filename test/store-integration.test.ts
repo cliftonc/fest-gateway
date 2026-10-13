@@ -22,7 +22,14 @@ import { openStore, migrate } from "../server/store/db.ts";
 import type { Store } from "../server/store/db.ts";
 import { createRequestWriter } from "../server/store/write.ts";
 import { ensureOrg, ensureUser } from "../server/store/bootstrap.ts";
-import { usageTotals, usageByUser, usageByModel, listRequests } from "../server/store/queries.ts";
+import {
+  usageTotals,
+  usageByUser,
+  usageByModel,
+  usageByTag,
+  listRequests,
+} from "../server/store/queries.ts";
+import { runRetention } from "../server/store/retention.ts";
 import type { Scope } from "../server/store/queries.ts";
 import { EMPTY_USAGE } from "../shared/types.ts";
 import type { UsageRecord } from "../shared/types.ts";
@@ -204,4 +211,97 @@ test("member scope cannot see another member's requests", (t) => {
   assert.equal(feed.rows.length, 1);
   assert.equal(feed.rows[0]?.userId, alice.id);
   assert.equal(usageTotals(store, asAlice, SHORT).usage.inputTokens, 11);
+});
+
+// ── Tags ─────────────────────────────────────────────────────────────────────
+//
+// Tags are a cube dimension (migration 007), keyed on the whole tag set. These
+// prove the two properties that design rests on: a filter means the same thing
+// on both sides of the 2h threshold, and "no filter" still adds up to exactly
+// one count per request even though every tag set is its own row.
+
+function seedTagged(t: any) {
+  const ctx = setup(t);
+  const { orgId, alice, bob, writer } = ctx;
+  const tokens = (n: number) => ({ ...EMPTY_USAGE, inputTokens: n });
+  writer.writeBatch(orgId, [
+    rec({ userId: alice.id, tags: { team: "platform", project: "fest" }, usage: tokens(1) }),
+    rec({ userId: alice.id, tags: { team: "platform", project: "web" }, usage: tokens(2) }),
+    rec({ userId: bob.id, tags: { team: "data", project: "fest" }, usage: tokens(4) }),
+    rec({ userId: bob.id, usage: tokens(8) }),
+    // Unattributed and tagged: the residual has to survive filtering too.
+    rec({ userId: null, tags: { project: "fest" }, usage: tokens(16) }),
+  ]);
+  return ctx;
+}
+
+test("a tag filter gives the same answer from raw rows and from the rollup", (t) => {
+  const { store, scope } = seedTagged(t);
+  const cases: Array<[Record<string, string> | undefined, number]> = [
+    [undefined, 31],
+    [{ project: "fest" }, 21],
+    [{ team: "platform" }, 3],
+    [{ team: "platform", project: "fest" }, 1],
+    [{ team: "nobody" }, 0],
+  ];
+  for (const [tags, input] of cases) {
+    for (const range of [SHORT, LONG]) {
+      assert.equal(
+        usageTotals(store, scope, { ...range, tags }).usage.inputTokens,
+        input,
+        `${JSON.stringify(tags)} over ${range === SHORT ? "raw" : "rollup"}`,
+      );
+    }
+  }
+});
+
+test("per-tag rows add up to the total, untagged traffic included", (t) => {
+  const { store, scope } = seedTagged(t);
+  for (const range of [SHORT, LONG]) {
+    const rows = usageByTag(store, scope, range, "project");
+    assert.deepEqual(
+      rows.map((r) => [r.value, r.usage.inputTokens]),
+      // Most requests first; on a tie the untagged bucket sorts last.
+      [
+        ["fest", 21],
+        ["web", 2],
+        ["", 8],
+      ],
+    );
+    const sum = rows.reduce((a, r) => a + r.requests, 0);
+    assert.equal(sum, usageTotals(store, scope, range).requests);
+  }
+});
+
+test("breakdowns honour the tag filter, including the unattributed residual", (t) => {
+  const { store, scope, alice, bob } = seedTagged(t);
+  for (const range of [SHORT, LONG]) {
+    const users = usageByUser(store, scope, { ...range, tags: { project: "fest" } });
+    const byId = new Map(users.map((u) => [u.userId, u.usage.inputTokens]));
+    assert.equal(byId.get(alice.id), 1);
+    assert.equal(byId.get(bob.id), 4);
+    assert.equal(byId.get(""), 16, "unattributed tagged usage is a residual on the rollup");
+    assert.equal(usageByModel(store, scope, { ...range, tags: { project: "web" } })[0]?.usage.inputTokens, 2);
+  }
+  const feed = listRequests(store, scope, { limit: 50, tags: { team: "platform" } });
+  assert.equal(feed.rows.length, 2);
+});
+
+test("a member's tag filter only narrows their own traffic", (t) => {
+  const { store, orgId, alice } = seedTagged(t);
+  const asAlice: Scope = { orgId, role: "member", userId: alice.id };
+  for (const range of [SHORT, LONG]) {
+    assert.equal(usageTotals(store, asAlice, { ...range, tags: { project: "fest" } }).usage.inputTokens, 1);
+    assert.deepEqual(
+      usageByTag(store, asAlice, range, "project").map((r) => r.value),
+      ["fest", "web"],
+    );
+  }
+});
+
+test("tag filters keep working after retention deletes the raw rows", (t) => {
+  const { store, scope } = seedTagged(t);
+  runRetention(store, { requestDays: 1, rollupDays: 400 }, NOW + 10 * 86_400_000);
+  assert.equal(listRequests(store, scope, { limit: 50 }).rows.length, 0, "raw rows are gone");
+  assert.equal(usageTotals(store, scope, { ...LONG, tags: { project: "fest" } }).usage.inputTokens, 21);
 });

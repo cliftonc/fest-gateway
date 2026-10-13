@@ -193,6 +193,17 @@ kind of persistence.
   from Copilot's own user cache (`FEST_COPILOT_PLAN` overrides it). The modes
   are bring-your-own-key instead: `anthropic` on `ANTHROPIC_API_KEY`, `gw` on
   the gateway's routes, `openai` on `OPENAI_API_KEY`. See [COPILOT.md](COPILOT.md).
+- **`fest tags [set [-g] k=v... | unset [-g] k...]`** — labels on your usage, so
+  the dashboard can filter and group by team, project or anything else. `fest
+  claude|codex|copilot` send them on every request, and accept leading
+  `--tag key=value` flags for one session (`fest claude --tag project=x
+  --resume`). `fest tags set` saves for the **current directory and everything
+  under it**; `-g` saves globally. Precedence, lowest first: `project=<git repo
+  name>` → global → saved directories, outermost first →
+  `FEST_TAGS="team=platform,project=fest"` → `--tag`. An empty value
+  (`project=`) removes a key. Saved tags live in `~/.fest/tags.json`, which login
+  and logout leave alone. Each command prints the tags it is using.
+  See [TAGS.md](TAGS.md), including how to tag without the CLI.
 - **`fest logout`** — deletes `~/.fest/config.json` only. It does **not**
   revoke the token server-side; that stays an explicit `fest token revoke
   <id>`, an operator action against the database. Logout here means "forget

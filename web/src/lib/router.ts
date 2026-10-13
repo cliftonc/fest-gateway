@@ -10,7 +10,8 @@
  * on first paint the way the effect version can.
  */
 
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
+import { buildHash, globalParams, parseHash } from "./url-state.ts";
 
 /**
  * Nav order is landing order. The live feed is first because it answers "is
@@ -34,18 +35,59 @@ export const PAGE_TITLES: Readonly<Record<PageId, string>> = {
   admin: "Audit log",
 };
 
-function currentHash(): string {
-  return window.location.hash.replace(/^#\/?/, "").split("?")[0] ?? "";
+function currentPage(): string {
+  return parseHash(window.location.hash).page;
 }
+
+/**
+ * `replaceState` does not fire `hashchange`, so filter writes announce
+ * themselves on this event instead, and every URL subscriber listens to both.
+ */
+const URL_EVENT = "fest:urlchange";
 
 function subscribe(cb: () => void): () => void {
   window.addEventListener("hashchange", cb);
-  return () => window.removeEventListener("hashchange", cb);
+  window.addEventListener(URL_EVENT, cb);
+  return () => {
+    window.removeEventListener("hashchange", cb);
+    window.removeEventListener(URL_EVENT, cb);
+  };
 }
 
 export function usePage(): PageId {
-  const hash = useSyncExternalStore(subscribe, currentHash, () => "");
-  return (PAGES as readonly string[]).includes(hash) ? (hash as PageId) : "live";
+  const page = useSyncExternalStore(subscribe, currentPage, () => "");
+  return (PAGES as readonly string[]).includes(page) ? (page as PageId) : "live";
 }
 
-export const hrefFor = (page: PageId): string => `#/${page}`;
+/**
+ * The filter params in the hash (see `url-state.ts`). The snapshot is the raw
+ * hash STRING — stable between renders, unlike a fresh URLSearchParams — and
+ * is parsed once per change.
+ */
+export function useUrlParams(): URLSearchParams {
+  const hash = useSyncExternalStore(subscribe, () => window.location.hash, () => "");
+  return useMemo(() => parseHash(hash).params, [hash]);
+}
+
+/**
+ * Rewrite the current page's params. `replaceState`, not a new history entry:
+ * nudging a filter should not turn the back button into an undo stack.
+ * Built from the full current URL rather than a bare `#…`, which would resolve
+ * against the deployment's `<base href>` instead of this document.
+ */
+export function setUrlParams(update: (params: URLSearchParams) => URLSearchParams): void {
+  const { page, params } = parseHash(window.location.hash);
+  const next = buildHash(page === "" ? "live" : page, update(params));
+  if (next === window.location.hash) return;
+  const url = `${window.location.href.split("#")[0] ?? ""}${next}`;
+  window.history.replaceState(window.history.state, "", url);
+  window.dispatchEvent(new Event(URL_EVENT));
+}
+
+/**
+ * A nav link that keeps the global filters (range, tags) — moving from Stats to
+ * Models should not drop "project=fest". Pass the current params so the link
+ * re-renders when they change.
+ */
+export const hrefFor = (page: PageId, current?: URLSearchParams): string =>
+  buildHash(page, current === undefined ? new URLSearchParams() : globalParams(current));

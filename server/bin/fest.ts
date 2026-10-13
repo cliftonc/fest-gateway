@@ -73,6 +73,7 @@ import { runClaude } from "../../cli/claude.ts";
 import { runCodex } from "../../cli/codex.ts";
 import { runCopilot } from "../../cli/copilot.ts";
 import { runLogout } from "../../cli/logout.ts";
+import { peelTagFlags, runTags } from "../../cli/tags.ts";
 import { readCliConfig } from "../../cli/config.ts";
 
 const out = (s: string): void => void process.stdout.write(s + "\n");
@@ -560,12 +561,19 @@ function printHelp(): void {
       "developer (run on your own machine, no server env needed):\n" +
       "  fest login [--provider google|github] [--server <url>]\n" +
       "  fest whoami\n" +
-      "  fest claude [gw] [-- claude args...]   (gw: force org credentials + gateway models)\n" +
-      "  fest codex [key] [-- codex args...]    (key: force API-key mode over a ChatGPT login)\n" +
-      "  fest copilot [anthropic|gw|openai] [-- copilot args...]\n" +
+      "  fest claude [gw] [--tag k=v]... [-- claude args...]\n" +
+      "                                         (gw: force org credentials + gateway models)\n" +
+      "  fest codex [key] [--tag k=v]... [-- codex args...]\n" +
+      "                                         (key: force API-key mode over a ChatGPT login)\n" +
+      "  fest copilot [anthropic|gw|openai] [--tag k=v]... [-- copilot args...]\n" +
       "                                         (Copilot CLI on your Copilot plan; BYOK instead with\n" +
       "                                          anthropic: your ANTHROPIC_API_KEY, gw: gateway routes,\n" +
       "                                          openai: your OPENAI_API_KEY)\n" +
+      "  fest tags | tags set [-g] k=v [k=v...] | tags unset [-g] k [k...]\n" +
+      "                                         (labels on your usage, e.g. team=platform; saved\n" +
+      "                                          for this directory and below, -g for everywhere;\n" +
+      "                                          project defaults to the git repo name; FEST_TAGS\n" +
+      "                                          and --tag override, project= removes)\n" +
       "  fest logout",
   );
 }
@@ -590,21 +598,27 @@ async function cmdLogin(argv: readonly string[]): Promise<void> {
  * `loadConfig()` is ever called: a laptop has no reason to have any FEST_*
  * server env var set, and these commands must not imply otherwise.
  */
-const CLIENT_COMMANDS = new Set(["login", "whoami", "claude", "codex", "copilot", "logout"]);
+const CLIENT_COMMANDS = new Set(["login", "whoami", "claude", "codex", "copilot", "tags", "logout"]);
 
 /**
- * Peel an optional mode word off a client command's args, then a conventional
- * leading `--`. Only before `--`: `fest codex -- key` forwards `key`.
+ * Peel an optional mode word off a client command's args, then any leading
+ * `--tag k=v` flags, then a conventional leading `--`. Only before `--`:
+ * `fest codex -- key` forwards `key`.
  */
-function modeArgs<M extends string>(argv: readonly string[], modes: readonly M[]): { mode: M | null; rest: string[] } {
+function modeArgs<M extends string>(
+  argv: readonly string[],
+  modes: readonly M[],
+): { mode: M | null; rest: string[]; tags: string[] } {
   let rest = [...argv];
   let mode: M | null = null;
   if (rest[0] !== undefined && (modes as readonly string[]).includes(rest[0])) {
     mode = rest[0] as M;
     rest = rest.slice(1);
   }
+  const peeled = peelTagFlags(rest);
+  rest = peeled.rest;
   if (rest[0] === "--") rest = rest.slice(1);
-  return { mode, rest };
+  return { mode, rest, tags: peeled.tags };
 }
 
 async function main(): Promise<void> {
@@ -625,24 +639,30 @@ async function main(): Promise<void> {
         // `fest claude -- gw` still forwards `gw` to the child.
         const posture = claudeArgs[0] === "gw" ? "key" : "auto";
         if (posture === "key") claudeArgs = claudeArgs.slice(1);
+        // Leading `--tag k=v` flags are Fest's; see `cli/tags.ts`.
+        const { tags, rest: afterTags } = peelTagFlags(claudeArgs);
+        claudeArgs = afterTags;
         // `fest claude -- --resume` and `fest claude --resume` are both fine:
         // apart from `gw` this subcommand defines no flags of its own, so a
         // leading `--` is only ever there by convention and is stripped rather
         // than forwarded.
         if (claudeArgs[0] === "--") claudeArgs = claudeArgs.slice(1);
-        await runClaude(claudeArgs, posture);
+        await runClaude(claudeArgs, posture, tags);
         return;
       }
       case "codex": {
-        const { mode, rest } = modeArgs(argv.slice(1), ["key"] as const);
-        await runCodex(rest, mode ?? "auto");
+        const { mode, rest, tags } = modeArgs(argv.slice(1), ["key"] as const);
+        await runCodex(rest, mode ?? "auto", tags);
         return;
       }
       case "copilot": {
-        const { mode, rest } = modeArgs(argv.slice(1), ["anthropic", "gw", "openai"] as const);
-        await runCopilot(rest, mode ?? "subscription");
+        const { mode, rest, tags } = modeArgs(argv.slice(1), ["anthropic", "gw", "openai"] as const);
+        await runCopilot(rest, mode ?? "subscription", tags);
         return;
       }
+      case "tags":
+        await runTags(argv.slice(1));
+        return;
       case "logout":
         await runLogout();
         return;

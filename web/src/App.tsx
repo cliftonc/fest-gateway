@@ -10,11 +10,14 @@
  * paid is on Stats, with the rest of what already happened.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Moon, Sun } from "lucide-react";
-import { PAGES, PAGE_TITLES, hrefFor, usePage } from "./lib/router.ts";
-import { DEFAULT_RANGE_ID, RANGE_OPTIONS, rangeFor } from "./lib/range.ts";
+import { PAGES, PAGE_TITLES, hrefFor, setUrlParams, usePage, useUrlParams } from "./lib/router.ts";
+import { DEFAULT_RANGE_ID, RANGE_IDS, RANGE_OPTIONS, rangeFor } from "./lib/range.ts";
+import { readParam, withParam } from "./lib/url-state.ts";
+import { parseTagFilter } from "../../shared/tags.ts";
+import { TagFilterBar } from "./components/TagFilter.tsx";
 import { useTheme } from "./lib/theme.tsx";
 import { NearformMark } from "./components/NearformMark.tsx";
 import { GithubMark } from "./components/GithubMark.tsx";
@@ -132,15 +135,25 @@ function Dashboard({
   onSignedOut: () => void;
 }): React.JSX.Element {
   const page = usePage();
-  const [rangeId, setRangeId] = useState(DEFAULT_RANGE_ID);
+  // Range and tags live in the URL, never in state, so a refresh or a shared
+  // link reopens the same view. See `lib/url-state.ts`.
+  const params = useUrlParams();
+  const rangeId = readParam(params, "range", RANGE_IDS, DEFAULT_RANGE_ID);
+  const setRangeId = (id: string): void =>
+    setUrlParams((p) => withParam(p, "range", id, DEFAULT_RANGE_ID));
+  // `params` is memoised on the hash string, so this only re-parses on change.
+  const tags = useMemo(() => parseTagFilter(params.getAll("tag")), [params]);
   const [signOutError, setSignOutError] = useState<string | null>(null);
-  const range = rangeFor(rangeId);
+  const range = rangeFor(rangeId, Date.now(), tags);
   const setup = useSetupCli(user?.id);
 
   // The live feed is its own clock; a range picker on it would imply it shows
   // history, which it does not. Routing is config, not traffic — a range there
   // would imply the table had a past on this screen, and it does not.
   const showRange = page !== "live" && page !== "routing";
+  // Tags filter traffic, so they apply wherever traffic is shown — Live
+  // included, where they narrow the stream rather than a stored range.
+  const showTags = page !== "routing" && page !== "admin";
 
   return (
     // The shell owns the viewport and only the main panel scrolls, so the
@@ -168,7 +181,7 @@ function Dashboard({
         {PAGES.filter((p) => p !== "admin" || user?.role !== "member").map((p) => (
           <a
             key={p}
-            href={hrefFor(p)}
+            href={hrefFor(p, params)}
             aria-current={p === page ? "page" : undefined}
             className="block rounded-md px-2.5 py-1.5 text-sidebar-foreground no-underline hover:bg-sidebar-accent aria-[current=page]:bg-sidebar-primary aria-[current=page]:font-medium aria-[current=page]:text-sidebar-primary-foreground"
           >
@@ -215,6 +228,7 @@ function Dashboard({
           <h1 className="text-xl font-medium">{PAGE_TITLES[page]}</h1>
           <div className="flex flex-wrap items-center gap-2">
             {setup !== null && <SetupCliToggle state={setup} />}
+            {showTags && <TagFilterBar range={range} />}
             {showRange && (
               <>
                 <label htmlFor="range" className="ml-1 text-xs text-muted-foreground">
@@ -242,7 +256,7 @@ function Dashboard({
             on which one they happened to open. */}
         {setup !== null && <SetupCliPanel state={setup} />}
 
-        {page === "live" && <LivePage />}
+        {page === "live" && <LivePage tags={tags} />}
         {page === "routing" && <RoutingPage />}
         {page === "stats" && <StatsPage range={range} />}
         {page === "users" && <UsersPage range={range} />}

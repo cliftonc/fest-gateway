@@ -281,6 +281,12 @@ export interface UsageRecord {
    * this field existed (or by a test) still type-checks.
    */
   readonly client?: string | null | undefined;
+  /**
+   * Labels the client declared about its own traffic (`team`, `project`, …) —
+   * see `shared/tags.ts`. Self-declared and never used to decide anything.
+   * Optional for the same reason as `client`.
+   */
+  readonly tags?: Readonly<Record<string, string>> | undefined;
 
   readonly pipeline: Pipeline;
   /**

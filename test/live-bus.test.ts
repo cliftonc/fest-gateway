@@ -178,6 +178,7 @@ test("the live row projects only the fields the dashboard renders", () => {
     "startedAt",
     "status",
     "stream",
+    "tags",
     "ttfbMs",
     "usage",
     "userId",

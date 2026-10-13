@@ -19,6 +19,10 @@ code importing types straight out of `server/`.
   the build.
 - `series.ts` — the chart bucket-filling helper (keyed on epoch hour, not a
   formatted clock label — see the Phase 3 note in the main plan doc for why).
+- `tags.ts` — the request-tag format (`team=platform,project=fest`): parsing,
+  validation, the canonical sorted-JSON form both tables store, the `~…` path
+  segment, and the dashboard's `key:value` filter form. One definition for the
+  server, the CLI and the dashboard. See `docs/TAGS.md`.
 - `demotion-vars.ts` — the env vars that silently demote Claude Code off
   subscription auth. One list, imported by both `tools/canary.ts` and
   `cli/claude.ts`, so they can't drift apart.

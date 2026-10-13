@@ -59,4 +59,16 @@ for a chart library to do beyond drawing.
 - **Percentiles from the bucket histogram are interpolated, not exact.** Label
   them accordingly; percentiles genuinely do not merge across rollup rows, which
   is why buckets exist at all.
-- **Escape everything.** Model ids and token names are user-supplied.
+- **Escape everything.** Model ids and token names are user-supplied, and so
+  are tag values.
+- **Filters live in the URL, never in component state.** The range, the tag
+  filter, the Live window and the by-tag key are all params in the hash
+  (`#/stats?range=7d&tag=project:fest`), read with `useUrlParams` and written
+  with `setUrlParams` (`web/src/lib/router.ts`, pure helpers in
+  `lib/url-state.ts`). A refresh or a shared link must reopen the same view.
+  `range` and `tag` follow the reader across pages (`hrefFor` carries them);
+  page-only params stay with their page. Defaults are left out of the URL.
+- **The tag filter rides on the `Range`.** Every ranged API call sends
+  `tag=key:value` from `range.tags`, and every query key includes it through
+  `rangeKey(range)`. A page that builds its key from `fromMs`/`toMs` alone
+  will show stale, unfiltered data after a filter change. See `docs/TAGS.md`.

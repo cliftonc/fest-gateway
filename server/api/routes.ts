@@ -26,7 +26,10 @@ import {
   errorBreakdown,
   latencySummary,
   latestQuotaByUser,
+  usageByTag,
+  tagValues,
 } from "../store/queries.ts";
+import { isValidTagKey, parseTagFilter } from "../../shared/tags.ts";
 import type { UsageSink } from "../ingest/sink.ts";
 import type { LiveBus } from "../ingest/live-bus.ts";
 import type { RouteTable } from "../routes/table.ts";
@@ -44,6 +47,7 @@ import type {
   ErrorsResponse,
   QuotaResponse,
   AuditResponse,
+  TagsResponse,
 } from "../../shared/api.ts";
 
 const DEFAULT_RANGE_MS = 24 * 3_600_000;
@@ -65,7 +69,15 @@ export function parseRange(params: URLSearchParams, now = Date.now()): TimeRange
   const toMs = intParam(params, "to") ?? now;
   const fromRaw = intParam(params, "from") ?? toMs - DEFAULT_RANGE_MS;
   const fromMs = Math.max(fromRaw, toMs - MAX_RANGE_MS);
-  return { fromMs: Math.min(fromMs, toMs), toMs };
+  const tags = parseTagFilter(params.getAll("tag"));
+  return {
+    fromMs: Math.min(fromMs, toMs),
+    toMs,
+    // Only present when filtering, so an unfiltered range is exactly what it
+    // was before tags existed. Invalid `tag=` values are dropped by the parser,
+    // never bound as-is.
+    ...(Object.keys(tags).length > 0 ? { tags } : {}),
+  };
 }
 
 function strParam(params: URLSearchParams, name: string): string | undefined {
@@ -148,8 +160,21 @@ export function handleApi(
         ...(params.get("errorsOnly") === "1" ? { errorsOnly: true } : {}),
         ...(intParam(params, "before") !== undefined ? { beforeSeq: intParam(params, "before") } : {}),
         ...(intParam(params, "limit") !== undefined ? { limit: intParam(params, "limit") } : {}),
+        ...(range.tags !== undefined ? { tags: range.tags } : {}),
       };
       json(res, 200, listRequests(deps.store, scope, filter) satisfies RequestsResponse);
+      return true;
+    }
+
+    case "/api/tags": {
+      const by = strParam(params, "by")?.trim().toLowerCase();
+      const key = by !== undefined && isValidTagKey(by) ? by : null;
+      json(res, 200, {
+        range,
+        keys: tagValues(deps.store, scope, range),
+        by: key,
+        rows: key === null ? [] : usageByTag(deps.store, scope, range, key),
+      } satisfies TagsResponse);
       return true;
     }
 

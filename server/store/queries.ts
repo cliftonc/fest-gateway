@@ -60,6 +60,7 @@ import { NON_ERROR_STATUSES } from "../../shared/types.ts";
 import type { Cost } from "../usage/cost.ts";
 import { cacheHitRatio } from "../usage/pricing.ts";
 import type { Store } from "./db.ts";
+import { tagsFromCanonical, type TagFilter } from "../../shared/tags.ts";
 
 // ── Scope ─────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,16 @@ export interface TimeRange {
   readonly fromMs: number;
   /** Exclusive. */
   readonly toMs: number;
+  /**
+   * The dashboard's tag filter (`team=platform AND project=fest`), or none.
+   *
+   * It rides on the range rather than as a separate argument because the two
+   * are applied together, in `rawRange` / `rollupRange`, which every ranged
+   * query already calls. A screen therefore cannot honour the date and forget
+   * the tags, and the raw and rollup sides of the 2h threshold cannot disagree
+   * about what a tag filter means.
+   */
+  readonly tags?: TagFilter | undefined;
 }
 
 /** Everything `node:sqlite` will accept as a bound parameter here. */
@@ -200,14 +211,44 @@ function hourFloor(ms: number): number {
  * mistaken for a quiet period.
  */
 function rollupRange(range: TimeRange): Clause {
+  const tags = tagClause("h.tags", range.tags);
   return {
-    sql: "h.hour_start >= ? AND h.hour_start < ?",
-    params: [hourFloor(range.fromMs), range.toMs],
+    sql: `h.hour_start >= ? AND h.hour_start < ?${tags.sql}`,
+    params: [hourFloor(range.fromMs), range.toMs, ...tags.params],
   };
 }
 
 function rawRange(range: TimeRange): Clause {
-  return { sql: "r.started_at >= ? AND r.started_at < ?", params: [range.fromMs, range.toMs] };
+  const tags = tagClause("r.tags_json", range.tags);
+  return {
+    sql: `r.started_at >= ? AND r.started_at < ?${tags.sql}`,
+    params: [range.fromMs, range.toMs, ...tags.params],
+  };
+}
+
+/**
+ * ` AND json_extract(col, '$."team"') = ?` per filtered key, or nothing.
+ *
+ * Both tables hold the same canonical JSON (`shared/tags.ts`), so one fragment
+ * serves both. The key is bound as part of the JSON path rather than spliced
+ * into the SQL: it comes off a query string. `''` and NULL (untagged) yield
+ * NULL from `json_extract`, which never equals a value, so an untagged row is
+ * correctly excluded from every tag filter.
+ */
+function tagClause(column: string, tags: TagFilter | undefined): Clause {
+  if (tags === undefined) return { sql: "", params: [] };
+  let sql = "";
+  const params: Param[] = [];
+  for (const key of Object.keys(tags).sort()) {
+    sql += ` AND json_extract(NULLIF(${column}, ''), ?) = ?`;
+    params.push(tagPath(key), tags[key]!);
+  }
+  return { sql, params };
+}
+
+/** `$."team"` — quoted, so a key with `.` or `-` is one path step, not two. */
+function tagPath(key: string): string {
+  return `$.${JSON.stringify(key)}`;
 }
 
 // ── Row coercion ──────────────────────────────────────────────────────────────
@@ -294,6 +335,7 @@ export interface RequestRow {
   readonly rlClaim: string | null;
   readonly clientVersion: string | null;
   readonly client: string | null;
+  readonly tags: Record<string, string>;
   readonly pipeline: string;
   /** Null when no route matched and the default pass-through applied. */
   readonly routeId: string | null;
@@ -306,6 +348,8 @@ export interface FeedFilter {
   readonly credentialOrigin?: string | undefined;
   readonly errorsOnly?: boolean | undefined;
   readonly sessionId?: string | undefined;
+  /** AND of exact tag matches; see `TimeRange.tags`. */
+  readonly tags?: TagFilter | undefined;
   /** Keyset cursor: return rows with seq < beforeSeq. */
   readonly beforeSeq?: number | undefined;
   readonly limit?: number | undefined;
@@ -348,7 +392,7 @@ const FEED_COLUMNS = `
   r.cache_write_1h_tokens, r.output_tokens, r.web_searches, r.service_tier,
   r.cost_usd, r.cost_basis, r.notional_cost_usd, r.ttfb_ms, r.duration_ms,
   r.rl_5h_utilization, r.rl_claim, r.client_version, r.client,
-  r.pipeline, r.route_id, r.credentials_considered`;
+  r.pipeline, r.route_id, r.credentials_considered, r.tags_json`;
 
 /**
  * Build the feed SQL and params. Exported so the query-plan test can assert on
@@ -381,6 +425,9 @@ export function feedSql(scope: Scope, filter: FeedFilter): { sql: string; params
     params.push(filter.sessionId);
   }
   if (filter.errorsOnly) where += ` AND ${RAW_IS_ERROR}`;
+  const tags = tagClause("r.tags_json", filter.tags);
+  where += tags.sql;
+  params.push(...tags.params);
 
   params.push(clampCursor(filter.beforeSeq));
   params.push(clampLimit(filter.limit));
@@ -445,6 +492,7 @@ function toRequestRow(row: Row): RequestRow {
     rlClaim: strOrNull(row["rl_claim"]),
     clientVersion: strOrNull(row["client_version"]),
     client: strOrNull(row["client"]),
+    tags: tagsFromCanonical(strOrNull(row["tags_json"])),
     pipeline: str(row["pipeline"], "passthrough"),
     routeId: strOrNull(row["route_id"]),
     // Stored as JSON because it is an audit note read whole. A row written
@@ -670,6 +718,8 @@ function subtractTotals(total: UsageTotals, parts: readonly UsageTotals[]): Usag
 }
 
 interface AggOpts {
+  /** Bound parameters used by the select expressions, which come first in SQL. */
+  readonly selectParams?: readonly Param[];
   readonly rawSelect?: string;
   readonly rollupSelect?: string;
   readonly rawJoin?: string;
@@ -700,7 +750,7 @@ function aggregateQuery(
         WHERE ${scoped.sql} AND ${time.sql}
         ${opts.rawGroupBy ? `GROUP BY ${opts.rawGroupBy}` : ""}
         ${opts.orderBy ? `ORDER BY ${opts.orderBy}` : ""}`,
-      params: [...scoped.params, ...time.params],
+      params: [...(opts.selectParams ?? []), ...scoped.params, ...time.params],
     };
   }
   const slice = rollupSlice(scope, grain);
@@ -712,7 +762,7 @@ function aggregateQuery(
       WHERE ${slice.sql} AND ${time.sql}
       ${opts.rollupGroupBy ? `GROUP BY ${opts.rollupGroupBy}` : ""}
       ${opts.orderBy ? `ORDER BY ${opts.orderBy}` : ""}`,
-    params: [...slice.params, ...time.params],
+    params: [...(opts.selectParams ?? []), ...slice.params, ...time.params],
   };
 }
 
@@ -893,6 +943,93 @@ export function usageByClient(
     client: str(row["client"]),
     ...toTotals(row),
   }));
+}
+
+/**
+ * Totals per value of one tag key (`project` → fest, website, …).
+ *
+ * Unlike `usageByClient` this keeps working at any range: tags are a rollup
+ * dimension (migration 007), so it reads whichever source `chooseSource`
+ * picked. Org grain, so each request is counted once. `value: ""` is traffic
+ * without that key — shown, not dropped, so the rows still add up to the total.
+ */
+export function usageByTag(
+  store: Store,
+  scope: Scope,
+  range: TimeRange,
+  key: string,
+): Array<{ value: string } & UsageTotals> {
+  const path = tagPath(key);
+  const q = aggregateQuery(scope, range, ORG_GRAIN, {
+    selectParams: [path],
+    rawSelect: "COALESCE(json_extract(NULLIF(r.tags_json, ''), ?), '') AS tag_value",
+    rollupSelect: "COALESCE(json_extract(NULLIF(h.tags, ''), ?), '') AS tag_value",
+    rawGroupBy: "tag_value",
+    rollupGroupBy: "tag_value",
+    orderBy: "requests DESC, tag_value = '' ASC, tag_value ASC",
+  });
+  return (store.db.prepare(q.sql).all(...q.params) as Row[]).map((row) => ({
+    value: str(row["tag_value"]),
+    ...toTotals(row),
+  }));
+}
+
+/**
+ * Every tag key in range and the values seen for it, most-used first — what
+ * the dashboard's filter offers. Read from the rollup's distinct tag sets
+ * (plus raw rows for a short range), which is a few rows per developer-hour,
+ * then folded here.
+ *
+ * Deliberately ignores `range.tags`: the picker has to keep offering the other
+ * values of a key that is already filtered, or the reader could never switch.
+ */
+export function tagValues(
+  store: Store,
+  scope: Scope,
+  range: TimeRange,
+): Array<{ key: string; values: Array<{ value: string; requests: number }> }> {
+  const unfiltered: TimeRange = { fromMs: range.fromMs, toMs: range.toMs };
+  let rows: Row[];
+  if (chooseSource(unfiltered) === "requests") {
+    const scoped = scopeClause(scope, "r");
+    const time = rawRange(unfiltered);
+    rows = store.db
+      .prepare(
+        `SELECT r.tags_json AS tags, COUNT(*) AS requests FROM requests r
+         WHERE ${scoped.sql} AND ${time.sql} AND r.tags_json IS NOT NULL AND r.tags_json <> ''
+         GROUP BY r.tags_json`,
+      )
+      .all(...scoped.params, ...time.params) as Row[];
+  } else {
+    const slice = rollupSlice(scope, ORG_GRAIN);
+    const time = rollupRange(unfiltered);
+    rows = store.db
+      .prepare(
+        `SELECT h.tags AS tags, SUM(h.requests) AS requests FROM usage_hourly h
+         WHERE ${slice.sql} AND ${time.sql} AND h.tags <> ''
+         GROUP BY h.tags`,
+      )
+      .all(...slice.params, ...time.params) as Row[];
+  }
+
+  const byKey = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    const n = num(row["requests"]);
+    for (const [k, v] of Object.entries(tagsFromCanonical(strOrNull(row["tags"])))) {
+      const values = byKey.get(k) ?? new Map<string, number>();
+      values.set(v, (values.get(v) ?? 0) + n);
+      byKey.set(k, values);
+    }
+  }
+  const total = (m: Map<string, number>): number => [...m.values()].reduce((a, b) => a + b, 0);
+  return [...byKey.entries()]
+    .sort((a, b) => total(b[1]) - total(a[1]) || a[0].localeCompare(b[0]))
+    .map(([key, values]) => ({
+      key,
+      values: [...values.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([value, requests]) => ({ value, requests })),
+    }));
 }
 
 /**

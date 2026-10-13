@@ -26,6 +26,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readCliConfig } from "./config.ts";
+import { describeTags, sessionTags, tagSuffix } from "./tags.ts";
+import type { Tags } from "../shared/tags.ts";
 
 export type CodexMode = "chatgpt" | "key";
 
@@ -73,9 +75,10 @@ const toml = (s: string): string => JSON.stringify(s);
  */
 export function buildCodexInvocation(
   base: Readonly<Record<string, string | undefined>>,
-  cfg: { serverUrl: string; identityToken: string },
+  cfg: { serverUrl: string; identityToken: string; tags?: Tags | undefined },
   mode: CodexMode,
 ): { args: string[]; env: Record<string, string | undefined> } {
+  const server = `${cfg.serverUrl}${tagSuffix(cfg.tags ?? {})}`;
   const p = "model_providers.fest";
   const args = [
     "-c", `model_provider=${toml("fest")}`,
@@ -87,10 +90,10 @@ export function buildCodexInvocation(
 
   const hasEnvKey = (base["OPENAI_API_KEY"] ?? "") !== "";
   if (mode === "chatgpt") {
-    args.push("-c", `${p}.base_url=${toml(`${cfg.serverUrl}/chatgpt/backend-api/codex`)}`);
+    args.push("-c", `${p}.base_url=${toml(`${server}/chatgpt/backend-api/codex`)}`);
     args.push("-c", `${p}.requires_openai_auth=true`);
   } else {
-    args.push("-c", `${p}.base_url=${toml(`${cfg.serverUrl}/openai/v1`)}`);
+    args.push("-c", `${p}.base_url=${toml(`${server}/openai/v1`)}`);
     args.push(
       "-c",
       hasEnvKey ? `${p}.env_key=${toml("OPENAI_API_KEY")}` : `${p}.requires_openai_auth=true`,
@@ -102,9 +105,15 @@ export function buildCodexInvocation(
 
 const note = (s: string): void => void process.stderr.write(`fest codex: ${s}\n`);
 
-export async function runCodex(argv: readonly string[], requested: CodexMode | "auto" = "auto"): Promise<void> {
+export async function runCodex(
+  argv: readonly string[],
+  requested: CodexMode | "auto" = "auto",
+  tagFlags: readonly string[] = [],
+): Promise<void> {
   const cfg = await readCliConfig();
   if (cfg === null) throw new Error("not logged in. Run `fest login` first.");
+  const tags = await sessionTags(tagFlags);
+  note(describeTags(tags));
 
   const detected = requested === "auto" ? detectCodexMode(process.env) : null;
   const mode: CodexMode = requested === "auto" ? detected!.mode : requested;
@@ -114,7 +123,7 @@ export async function runCodex(argv: readonly string[], requested: CodexMode | "
   else if (requested === "key") note("API key forced — the key's owner pays.");
   else note(`API key (${detected!.detail}) — the key's owner pays.`);
 
-  const { args, env } = buildCodexInvocation(process.env, cfg, mode);
+  const { args, env } = buildCodexInvocation(process.env, { ...cfg, tags }, mode);
   const child = spawn("codex", [...args, ...argv], { stdio: "inherit", env });
 
   const code = await new Promise<number>((resolve, reject) => {

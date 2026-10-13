@@ -23,6 +23,8 @@ export interface TimeRangeWire {
   readonly fromMs: number;
   /** Exclusive, epoch ms. */
   readonly toMs: number;
+  /** The tag filter applied to this response, when one was. */
+  readonly tags?: Readonly<Record<string, string>> | undefined;
 }
 
 export interface UsageTotalsWire {
@@ -88,6 +90,8 @@ export interface RequestRowWire {
   readonly clientVersion: string | null;
   /** `claude-code`, `codex` or `copilot`; null when the client could not be told. */
   readonly client: string | null;
+  /** Labels the client declared (`team`, `project`, …); `{}` when none. */
+  readonly tags: Readonly<Record<string, string>>;
   /** `passthrough` or `substitute`. */
   readonly pipeline: string;
   /** The route that decided, or null when the default pass-through applied. */
@@ -158,6 +162,26 @@ export interface OverviewResponse {
   readonly byClient: ReadonlyArray<{ readonly client: string } & UsageTotalsWire>;
   readonly latency: LatencySummaryWire;
   readonly sink: SinkStatsWire;
+}
+
+export interface TagsResponse {
+  readonly range: TimeRangeWire;
+  /**
+   * Every tag key seen in the range and its values, most-used first — the
+   * filter picker's options. Ignores the active tag filter, so a key that is
+   * already filtered still offers its other values.
+   */
+  readonly keys: ReadonlyArray<{
+    readonly key: string;
+    readonly values: ReadonlyArray<{ readonly value: string; readonly requests: number }>;
+  }>;
+  /** The key `rows` is broken down by, when `by` was asked for. */
+  readonly by: string | null;
+  /**
+   * Totals per value of `by`, honouring the tag filter. `value: ""` is traffic
+   * without that key, so the rows add up to the filtered total.
+   */
+  readonly rows: ReadonlyArray<{ readonly value: string } & UsageTotalsWire>;
 }
 
 export interface RequestsResponse {

@@ -48,7 +48,9 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   `oauth.ts`) gate `/api/*` only; `posture.ts` detects a developer's identity
   token on the proxy path (`/v1/*`) and must never require a browser session.
   `gateway-401.ts` builds the user-facing error text shown to Claude Code
-  itself.
+  itself. `posture.ts` also peels the `~team=…,project=…` tag segment off the
+  path (with the token, so nothing downstream ever sees it) and merges it
+  with `x-fest-tags` — see `docs/TAGS.md`.
 - **`api/cli-auth.ts`** — `fest login`'s authorise + approve pair, and the only
   server-rendered HTML in the codebase. It mints an identity token from a
   dashboard session, so the approval POST's origin check and the loopback-only
@@ -60,7 +62,11 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   password sign-in/out/`me`; `oauth.ts` is Google/GitHub sign-in for both
   the dashboard and `fest login`, plus `/api/auth/identity`; `live.ts` is
   the SSE feed; `models.ts` is the `/v1/models` gateway menu.
-- **`store/`** — SQLite (via `node:sqlite`), forward-only migrations in
+- **`store/`** — SQLite (via `node:sqlite`). `usage_hourly` has the request's
+  whole tag set as a primary-key dimension (migration 007), so the dashboard's
+  tag filter works at every range; the filter rides on `TimeRange.tags` and is
+  applied in `rawRange`/`rollupRange`, which every ranged query already calls.
+  Forward-only migrations in
   `store/migrations/*.sql`, the write path (`write.ts`, bounded queue +
   batched flush, never on the request path), `queries.ts` (org/member
   scoping enforced *inside* the query layer, fails closed with no

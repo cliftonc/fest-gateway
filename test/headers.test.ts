@@ -70,6 +70,7 @@ function claudeCodeHeaders(): Record<string, string> {
     "content-type": "application/json",
     accept: "application/json",
     "x-fest-token": "fest_identityFIXTURE1234",
+    "x-fest-tags": "team=platform,project=fest",
   };
 }
 
@@ -117,6 +118,7 @@ test("Fest identity carriers and hop-by-hop headers are stripped; host is set", 
     upstreamHost: "api.anthropic.com",
   });
   assert.equal(out.get("x-fest-token"), null);
+  assert.equal(out.get("x-fest-tags"), null);
   assert.equal(out.get("connection"), null);
   assert.equal(out.get("host"), "api.anthropic.com");
   // The caller frames the body; a stale inbound length truncates the POST.

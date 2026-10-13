@@ -11,13 +11,13 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { api, type Range } from "../lib/api.ts";
+import { api, rangeKey, type Range } from "../lib/api.ts";
 import { Card, Muted, QueryState, Table, TableCell, TableRow, numCol } from "../components/ui.tsx";
 import { costTotal, modelLabel, notionalTotal, num, ratio, tokens } from "../lib/format.ts";
 
 export function ModelsPage({ range }: { range: Range }): React.JSX.Element {
   const models = useQuery({
-    queryKey: ["models", range.fromMs, range.toMs],
+    queryKey: ["models", ...rangeKey(range)],
     queryFn: () => api.models(range),
   });
 

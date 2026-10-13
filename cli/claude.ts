@@ -27,6 +27,8 @@ import { join } from "node:path";
 import { DEMOTION_VARS } from "../shared/demotion-vars.ts";
 import { BASE_MODELS } from "../shared/base-models.ts";
 import { readCliConfig } from "./config.ts";
+import { describeTags, sessionTags, tagSuffix } from "./tags.ts";
+import type { Tags } from "../shared/tags.ts";
 
 /** A resolved posture: what the child environment will actually be built for. */
 export type Posture = "subscription" | "key";
@@ -42,18 +44,21 @@ export type RequestedPosture = Posture | "auto";
  */
 export function buildClaudeEnv(
   base: Readonly<Record<string, string | undefined>>,
-  cfg: { serverUrl: string; identityToken: string },
+  cfg: { serverUrl: string; identityToken: string; tags?: Tags | undefined },
   posture: Posture = "subscription",
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...base };
   for (const v of DEMOTION_VARS) delete env[v];
+  // In the path, not ANTHROPIC_CUSTOM_HEADERS: a developer's own settings may
+  // already set that variable, and one carrier for every client is simpler.
+  const tags = tagSuffix(cfg.tags ?? {});
 
   if (posture === "key") {
-    env["ANTHROPIC_BASE_URL"] = cfg.serverUrl;
+    env["ANTHROPIC_BASE_URL"] = `${cfg.serverUrl}${tags}`;
     // Set after the strip, never by exempting it from the strip list.
     env["ANTHROPIC_AUTH_TOKEN"] = cfg.identityToken;
   } else {
-    env["ANTHROPIC_BASE_URL"] = `${cfg.serverUrl}/t/${cfg.identityToken}`;
+    env["ANTHROPIC_BASE_URL"] = `${cfg.serverUrl}/t/${cfg.identityToken}${tags}`;
   }
   return env;
 }
@@ -309,11 +314,17 @@ export function postureWarnings(
   return warnings;
 }
 
-export async function runClaude(argv: readonly string[], requested: RequestedPosture = "auto"): Promise<void> {
+export async function runClaude(
+  argv: readonly string[],
+  requested: RequestedPosture = "auto",
+  tagFlags: readonly string[] = [],
+): Promise<void> {
   const cfg = await readCliConfig();
   if (cfg === null) {
     throw new Error("not logged in. Run `fest login` first.");
   }
+  const tags = await sessionTags(tagFlags);
+  note(describeTags(tags));
 
   const login = requested === "auto" ? detectSubscriptionLogin() : null;
   const posture: Posture = requested === "auto" ? (login!.ok ? "subscription" : "key") : requested;
@@ -344,7 +355,7 @@ export async function runClaude(argv: readonly string[], requested: RequestedPos
     }
   }
 
-  const env = buildClaudeEnv(process.env, cfg, posture);
+  const env = buildClaudeEnv(process.env, { ...cfg, tags }, posture);
 
   const child = spawn("claude", argv as string[], { stdio: "inherit", env });
 

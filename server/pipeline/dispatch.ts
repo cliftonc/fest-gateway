@@ -139,6 +139,7 @@ export async function dispatchMessages(
     sessionId: sessionIdOf(req.headers),
     clientVersion: headerValue(req, "user-agent"),
     client: detectClient(req.headers),
+    tags: inbound.tags,
   };
 
   if (!credential.ok) {

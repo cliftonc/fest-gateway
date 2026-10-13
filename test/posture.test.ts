@@ -165,3 +165,46 @@ test("header lookup is case-insensitive", () => {
   assert.equal(got.posture, "subscription");
   assert.equal(got.identity.carrier, "header");
 });
+
+// ── Tag segment ──────────────────────────────────────────────────────────────
+
+test("a ~ tag segment after the token is parsed and stripped; the query survives", () => {
+  const got = parseIdentityPath(`/t/${FEST_TOKEN}/~team=platform,project=fest/v1/messages?beta=true`);
+  assert.equal(got.token, FEST_TOKEN);
+  assert.equal(got.remainder, "/v1/messages?beta=true");
+  assert.deepEqual(got.tags, { team: "platform", project: "fest" });
+});
+
+test("a ~ tag segment works without a token, as the first segment", () => {
+  const got = parseIdentityPath("/~project=fest/v1/messages");
+  assert.equal(got.token, null);
+  assert.equal(got.remainder, "/v1/messages");
+  assert.deepEqual(got.tags, { project: "fest" });
+});
+
+test("a ~ segment with nothing after it still addresses /", () => {
+  assert.equal(parseIdentityPath(`/t/${FEST_TOKEN}/~project=fest`).remainder, "/");
+  assert.equal(parseIdentityPath(`/t/${FEST_TOKEN}/~project=fest?beta=true`).remainder, "/?beta=true");
+});
+
+test("a ~ deeper in the path is left alone, and no segment means no tags", () => {
+  const deeper = parseIdentityPath(`/t/${FEST_TOKEN}/v1/~project=fest`);
+  assert.equal(deeper.remainder, "/v1/~project=fest");
+  assert.deepEqual(deeper.tags, {});
+  assert.deepEqual(parseIdentityPath("/v1/messages").tags, {});
+});
+
+test("garbage in the tag segment is dropped, never a failure", () => {
+  const got = parseIdentityPath(`/t/${FEST_TOKEN}/~%E0%A4%A,ok=1/v1/messages`);
+  assert.equal(got.remainder, "/v1/messages");
+  assert.deepEqual(got.tags, { ok: "1" });
+});
+
+test("path tags and x-fest-tags merge, the path winning per key", () => {
+  const inbound = detectInbound(`/t/${FEST_TOKEN}/~project=fest/v1/messages`, {
+    authorization: "Bearer sk-ant-oat01-abc",
+    "x-fest-tags": "project=other,team=platform",
+  });
+  assert.deepEqual(inbound.tags, { team: "platform", project: "fest" });
+  assert.equal(inbound.effectivePath, "/v1/messages");
+});

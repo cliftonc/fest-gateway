@@ -179,6 +179,7 @@ export async function handleMessages(
       rateLimit: null,
       clientVersion,
       client,
+      tags: inbound.tags,
       pipeline: "passthrough",
       routeId: ctx.routeId ?? null,
       // Recorded even though this path never chooses: a record that says

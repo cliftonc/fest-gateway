@@ -23,7 +23,17 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { api, type Range } from "../lib/api.ts";
+import { api, rangeKey, type Range } from "../lib/api.ts";
+import { setUrlParams, useUrlParams } from "../lib/router.ts";
+import { withParam } from "../lib/url-state.ts";
+import { addTagFilter } from "../components/TagFilter.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select.tsx";
 import { isExactRange } from "../lib/range.ts";
 import {
   Card,
@@ -89,7 +99,7 @@ export function StatsPage({ range }: { range: Range }): React.JSX.Element {
   ];
 
   const overview = useQuery({
-    queryKey: ["overview", range.fromMs, range.toMs],
+    queryKey: ["overview", ...rangeKey(range)],
     queryFn: () => api.overview(range),
   });
 
@@ -336,6 +346,8 @@ export function StatsPage({ range }: { range: Range }): React.JSX.Element {
         </QueryState>
       </Card>
 
+      <ByTagCard range={range} />
+
       <Card
         title="Tokens per hour"
         subtitle="The four buckets are disjoint: input excludes cache reads and writes, so the stack height is the context consumed, not a double count."
@@ -469,5 +481,111 @@ export function StatsPage({ range }: { range: Range }): React.JSX.Element {
         </QueryState>
       </Card>
     </>
+  );
+}
+
+/**
+ * Totals per value of one tag key — "how much is each project using". Unlike
+ * By client this works at any range: tags are a rollup dimension. The key is a
+ * page-local URL param (`by`), so a refresh keeps it; clicking a value adds it
+ * to the global filter, which narrows every page.
+ */
+function ByTagCard({ range }: { range: Range }): React.JSX.Element | null {
+  const params = useUrlParams();
+  const keysQuery = useQuery({
+    queryKey: ["tags", "options", range.fromMs, range.toMs],
+    queryFn: () => api.tags({ fromMs: range.fromMs, toMs: range.toMs }),
+    staleTime: 60_000,
+  });
+  const keys = (keysQuery.data?.keys ?? []).map((k) => k.key);
+  const wanted = params.get("by");
+  const by =
+    wanted !== null && keys.includes(wanted) ? wanted : keys.includes("project") ? "project" : (keys[0] ?? null);
+
+  const rows = useQuery({
+    queryKey: ["tags", "by", by, ...rangeKey(range)],
+    queryFn: () => api.tags(range, by),
+    enabled: by !== null,
+  });
+
+  // Nothing tagged in this range: no card, rather than an empty one explaining
+  // a feature the reader has not used. Docs cover how to start.
+  if (keysQuery.isSuccess && by === null) return null;
+  const active = range.tags ?? {};
+
+  return (
+    <Card
+      title="By tag"
+      subtitle="Labels clients declare about their own traffic — team, project, anything. Rows add up to the filtered total; “none” is traffic without this tag. Click a value to filter every page by it."
+      right={
+        keys.length > 1 && by !== null ? (
+          <Select value={by} onValueChange={(k) => setUrlParams((p) => withParam(p, "by", k, "project"))}>
+            <SelectTrigger size="sm" className="w-[140px]" aria-label="Tag to group by">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {keys.map((k) => (
+                <SelectItem key={k} value={k}>
+                  {k}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : undefined
+      }
+    >
+      <QueryState
+        isPending={keysQuery.isPending || rows.isPending}
+        error={keysQuery.error ?? rows.error}
+        isEmpty={(rows.data?.rows.length ?? 0) === 0}
+      >
+        <Table
+          head={[
+            by ?? "Tag",
+            numCol("Requests"),
+            numCol("Errors"),
+            numCol("Tokens"),
+            numCol("Cost"),
+            numCol("At list rates"),
+          ]}
+        >
+          {(rows.data?.rows ?? []).map((row) => (
+            <TableRow key={row.value}>
+              <TableCell>
+                {row.value === "" ? (
+                  <Muted title={`Traffic that declared no ${by ?? "tag"}, including everything sent before tags existed.`}>
+                    none
+                  </Muted>
+                ) : active[by ?? ""] === row.value ? (
+                  <Pill tone="info">{row.value}</Pill>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-left text-link hover:underline"
+                    title={`Filter every page to ${by}=${row.value}`}
+                    onClick={() => by !== null && addTagFilter(active, by, row.value)}
+                  >
+                    {row.value}
+                  </button>
+                )}
+              </TableCell>
+              <TableCell className="num">{num(row.requests)}</TableCell>
+              <TableCell className="num">{row.errors === 0 ? <Muted>0</Muted> : row.errors}</TableCell>
+              <TableCell className="num">{tokens(contextTokens(row.usage) + row.usage.outputTokens)}</TableCell>
+              <TableCell className="num">
+                {row.subscriptionRequests === row.requests ? (
+                  <Muted title="A subscription absorbed every request in this row, so no dollar figure applies.">
+                    subscription
+                  </Muted>
+                ) : (
+                  costTotal(row)
+                )}
+              </TableCell>
+              <TableCell className="num text-status-sub">{notionalTotal(row)}</TableCell>
+            </TableRow>
+          ))}
+        </Table>
+      </QueryState>
+    </Card>
   );
 }

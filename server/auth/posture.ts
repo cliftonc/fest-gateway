@@ -27,6 +27,7 @@
 
 import type { Posture, Identity } from "../../shared/types.ts";
 import { classifyCredential, fingerprint, type CredentialInfo } from "../secret/fingerprint.ts";
+import { parseTagPairs, parseTags, tagsFromPairs } from "../../shared/tags.ts";
 
 export interface InboundAuth {
   readonly posture: Posture;
@@ -37,6 +38,11 @@ export interface InboundAuth {
   readonly identityToken: string | null;
   /** Path with any identity prefix removed, e.g. "/v1/messages?beta=true". */
   readonly effectivePath: string;
+  /**
+   * Tags the client declared, from the `~…` path segment and the
+   * `x-fest-tags` header (path wins per key). Labels only — see `shared/tags.ts`.
+   */
+  readonly tags: Readonly<Record<string, string>>;
 }
 
 /**
@@ -51,8 +57,26 @@ const UPSTREAM_CREDENTIAL_HEADERS: readonly string[] = ["authorization", "x-api-
 /** Path prefixes that carry an identity token. `/t/` is the short form. */
 const IDENTITY_PATH_PREFIX = /^\/(?:t|fest)\/([^/?#]+)(\/[^?#]*)?(\?.*|#.*)?$/;
 
+/** A leading `~…` tag segment, and whatever follows it. */
+const TAG_SEGMENT = /^\/~([^/?#]*)(\/[^?#]*)?(\?.*|#.*)?$/;
+
 /**
- * Split a leading `/t/<token>` or `/fest/<token>` segment off the request URL.
+ * Split a `~team=platform,project=fest` tag segment off the front of a path.
+ *
+ * No upstream API path starts with `~`, so the segment cannot be mistaken for
+ * anything the client meant to send upstream; it is removed here so nothing
+ * downstream of this module ever sees it. See `shared/tags.ts`.
+ */
+function splitTagSegment(url: string): { tagSegment: string | null; rest: string } {
+  const match = TAG_SEGMENT.exec(url);
+  if (!match) return { tagSegment: null, rest: url };
+  const path = match[2] ?? "/";
+  return { tagSegment: match[1] ?? "", rest: `${path === "" ? "/" : path}${match[3] ?? ""}` };
+}
+
+/**
+ * Split a leading `/t/<token>` or `/fest/<token>` segment off the request URL,
+ * then a `~…` tag segment after it (or first, when there is no token).
  *
  * The query string belongs to the remainder, because Claude Code sends
  * `POST /v1/messages?beta=true` and dropping `?beta=true` changes the upstream
@@ -60,15 +84,22 @@ const IDENTITY_PATH_PREFIX = /^\/(?:t|fest)\/([^/?#]+)(\/[^?#]*)?(\?.*|#.*)?$/;
  * anchored regex, so a normal `/v1/messages` can never be mistaken for a token
  * (its first segment is not `t` or `fest`).
  */
-export function parseIdentityPath(url: string): { token: string | null; remainder: string } {
+export function parseIdentityPath(url: string): {
+  token: string | null;
+  remainder: string;
+  tags: Record<string, string>;
+} {
+  let token: string | null = null;
+  let rest = url;
   const match = IDENTITY_PATH_PREFIX.exec(url);
-  if (!match) return { token: null, remainder: url };
-  const token = match[1] ?? "";
-  if (token.length === 0) return { token: null, remainder: url };
-  // `/t/<tok>` with nothing after it still has to address a path upstream.
-  const path = match[2] ?? "/";
-  const suffix = match[3] ?? "";
-  return { token, remainder: `${path === "" ? "/" : path}${suffix}` };
+  if (match && (match[1] ?? "").length > 0) {
+    token = match[1]!;
+    // `/t/<tok>` with nothing after it still has to address a path upstream.
+    const path = match[2] ?? "/";
+    rest = `${path === "" ? "/" : path}${match[3] ?? ""}`;
+  }
+  const { tagSegment, rest: remainder } = splitTagSegment(rest);
+  return { token, remainder, tags: tagSegment === null ? {} : parseTags(tagSegment) };
 }
 
 /** `Bearer xyz` -> `xyz`; anything else unchanged. */
@@ -168,5 +199,16 @@ export function detectInbound(
     identity,
     identityToken,
     effectivePath: fromPath.remainder,
+    tags: tagsOf(fromPath.tags, headerValue(headers, "x-fest-tags")),
   };
+}
+
+/**
+ * Header tags first, path tags over them: the path is the form the fest CLI
+ * hands out, so as with the token it is the deliberate one.
+ */
+function tagsOf(fromPath: Readonly<Record<string, string>>, header: string | null): Record<string, string> {
+  const headerPairs = header === null ? [] : parseTagPairs(header).filter((p) => p.value !== "");
+  const pathPairs = Object.entries(fromPath).map(([key, value]) => ({ key, value }));
+  return tagsFromPairs([...headerPairs, ...pathPairs]);
 }

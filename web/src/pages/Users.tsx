@@ -10,14 +10,14 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { api, type Range } from "../lib/api.ts";
+import { api, rangeKey, type Range } from "../lib/api.ts";
 import { Card, Muted, Pill, QueryState, Table, TableCell, TableRow, numCol } from "../components/ui.tsx";
 import { Alert, AlertDescription } from "../components/ui/alert.tsx";
 import { contextTokens, costTotal, notionalTotal, num, personLabel, ratio, tokens } from "../lib/format.ts";
 
 export function UsersPage({ range }: { range: Range }): React.JSX.Element {
   const users = useQuery({
-    queryKey: ["users", range.fromMs, range.toMs],
+    queryKey: ["users", ...rangeKey(range)],
     queryFn: () => api.users(range),
   });
 

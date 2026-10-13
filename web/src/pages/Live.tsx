@@ -24,11 +24,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api.ts";
 import { rangeFor } from "../lib/range.ts";
+import { setUrlParams, useUrlParams } from "../lib/router.ts";
+import { withParam } from "../lib/url-state.ts";
+import type { TagFilter } from "../../../shared/tags.ts";
+import { addTagFilter } from "../components/TagFilter.tsx";
 import { subscribeLive } from "../lib/sse.ts";
 import { useLiveWindow, type LiveEvent } from "../hooks/useLiveWindow.ts";
 import { isErrorStatus, type RequestStatus } from "../../../shared/types.ts";
 import { ActivityPulse, modelColor } from "../components/live/ActivityPulse.tsx";
-import { LiveControls } from "../components/live/LiveControls.tsx";
+import { LiveControls, WINDOW_OPTIONS } from "../components/live/LiveControls.tsx";
 import { LiveStats } from "../components/live/LiveStats.tsx";
 import { RollupBoard, type RollupEntry } from "../components/live/RollupBoard.tsx";
 import { DeveloperAvatar } from "../components/live/DeveloperAvatar.tsx";
@@ -52,6 +56,11 @@ import {
 } from "../lib/measure.ts";
 
 const DEFAULT_WINDOW_MS = 300_000;
+
+/** A window from the URL, only if it is one the controls offer. */
+function readWindow(raw: string | null): number | null {
+  return WINDOW_OPTIONS.some((o) => o.id === raw) ? Number(raw) : null;
+}
 
 interface Rolled {
   requests: number;
@@ -81,14 +90,45 @@ function rollup(events: readonly LiveEvent[], keyOf: (e: LiveEvent) => string): 
   return out;
 }
 
-export function LivePage(): React.JSX.Element {
+/**
+ * One tag key rolled up into board rows. Untagged traffic is its own row, so
+ * the board adds up to the window; a value click adds it to the global filter.
+ */
+function tagRollup(events: readonly LiveEvent[], key: string, active: TagFilter): RollupEntry[] {
+  const m = rollup(events, (e) => e.tags[key] ?? "");
+  return [...m.entries()].map(([value, v]) => ({
+    key: value === "" ? "untagged" : value,
+    label:
+      value === "" ? (
+        <span className="truncate text-xs text-muted-foreground">no {key}</span>
+      ) : (
+        <button
+          type="button"
+          className="truncate text-left text-xs hover:underline"
+          title={`Filter every page to ${key}=${value}`}
+          onClick={() => addTagFilter(active, key, value)}
+        >
+          {value}
+        </button>
+      ),
+    requests: v.requests,
+    errors: v.errors,
+    tally: v.tally,
+  }));
+}
+
+export function LivePage({ tags }: { tags: TagFilter }): React.JSX.Element {
   const queryClient = useQueryClient();
-  const [windowMs, setWindowMs] = useState(DEFAULT_WINDOW_MS);
+  // In the URL like every other filter, so a refresh keeps the window.
+  const params = useUrlParams();
+  const windowMs = readWindow(params.get("window")) ?? DEFAULT_WINDOW_MS;
+  const setWindowMs = (ms: number): void =>
+    setUrlParams((p) => withParam(p, "window", String(ms), String(DEFAULT_WINDOW_MS)));
   const { measure, setMeasure } = useMeasure();
   const [connected, setConnected] = useState(false);
   const [paused, setPaused] = useState(false);
 
-  const { window: win, add, seed } = useLiveWindow(windowMs);
+  const { window: win, add, seed } = useLiveWindow(windowMs, tags);
 
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
@@ -211,6 +251,11 @@ export function LivePage(): React.JSX.Element {
       tally: v.tally,
     }));
   }, [events]);
+
+  // Team and project get a board each: they are the two tags every session
+  // carries by convention, so a fixed pair reads faster than a picker.
+  const byTeam = useMemo(() => tagRollup(events, "team", tags), [events, tags]);
+  const byProject = useMemo(() => tagRollup(events, "project", tags), [events, tags]);
 
   /** Ranked top-first: the pulse colours its stack by this order. */
   const rankedModels = useMemo(
@@ -346,6 +391,18 @@ export function LivePage(): React.JSX.Element {
         <RollupBoard
           title="By client"
           entries={byClient}
+          emptyText="No traffic in this window yet."
+          measure={measure}
+        />
+        <RollupBoard
+          title="By team"
+          entries={byTeam}
+          emptyText="No traffic in this window yet."
+          measure={measure}
+        />
+        <RollupBoard
+          title="By project"
+          entries={byProject}
           emptyText="No traffic in this window yet."
           measure={measure}
         />

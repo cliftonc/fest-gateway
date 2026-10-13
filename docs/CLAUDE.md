@@ -24,6 +24,9 @@ duplicates it.
   wire looks like.
 - `COPILOT.md` — Copilot CLI on its own login through the `/copilot` mount,
   where its GitHub token goes (and does not), and the BYOK modes.
+- `TAGS.md` — request tags (`team=…`, `project=…`): the wire format, the two
+  carriers, the CLI's precedence chain, and why the tag set is a rollup
+  dimension.
 - `CLI-AUTH.md` — OAuth setup and the `fest login`/`whoami`/`claude`/`codex`/`copilot`/`logout`
   flow end to end.
 - `canary-history.jsonl` — **data, not documentation.** Appended to by

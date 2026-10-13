@@ -53,6 +53,7 @@ fest logout     # forget the local token (does not revoke it server-side)
 fest claude gw  # force org credentials + the gateway's extra models
 fest codex      # OpenAI Codex CLI, on its own ChatGPT login or API key
 fest copilot    # GitHub Copilot CLI, on its own Copilot login
+fest tags set team=platform   # label usage from this directory down (-g: everywhere)
 ```
 
 Codex and Copilot CLI are metered into the same dashboard, labelled by client.
@@ -396,6 +397,7 @@ inside it — read the relevant one before working there.
 | [PRICING.md](docs/PRICING.md) | where rates come from, and spend vs. value |
 | [CODEX.md](docs/CODEX.md) | Codex CLI through the `/openai` and `/chatgpt` mounts |
 | [COPILOT.md](docs/COPILOT.md) | Copilot CLI on its own login through `/copilot`, what happens to the GitHub token, and BYOK |
+| [TAGS.md](docs/TAGS.md) | tagging usage by team, project or anything else, and filtering the dashboard by it |
 | [POSTURES.md](docs/POSTURES.md) | subscription vs. key posture |
 | [CANARY.md](docs/CANARY.md) | the version-upgrade gate |
 | [PHASE0.md](docs/PHASE0.md) · [PHASE0-RESULTS.md](docs/PHASE0-RESULTS.md) | the gating experiment, and what it found |

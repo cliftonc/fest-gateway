@@ -33,6 +33,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { BASE_MODELS } from "../shared/base-models.ts";
 import { readCliConfig } from "./config.ts";
+import { describeTags, sessionTags, tagSuffix } from "./tags.ts";
+import type { Tags } from "../shared/tags.ts";
 
 export type CopilotMode = "subscription" | "anthropic" | "gw" | "openai";
 
@@ -97,10 +99,13 @@ export function userCacheCandidates(env: Readonly<Env>, home: string, platform: 
  */
 export function buildCopilotEnv(
   base: Readonly<Env>,
-  cfg: { serverUrl: string; identityToken: string; plan?: CopilotPlan | undefined },
+  cfg: { serverUrl: string; identityToken: string; plan?: CopilotPlan | undefined; tags?: Tags | undefined },
   mode: CopilotMode,
 ): Env {
   const env: Env = { ...base };
+  // In the path for every mode: on its own login Copilot sends no custom
+  // headers, and one carrier is simpler than two.
+  const tags = tagSuffix(cfg.tags ?? {});
   // Start from a clean provider: an inherited COPILOT_PROVIDER_BEARER_TOKEN
   // silently takes precedence over the API key set below, and an inherited
   // base URL or type would point the session somewhere else entirely. In
@@ -119,7 +124,7 @@ export function buildCopilotEnv(
 
   if (mode === "subscription") {
     if (cfg.plan === undefined) throw new Error("subscription mode needs the Copilot plan.");
-    env["COPILOT_API_URL"] = `${cfg.serverUrl}/t/${cfg.identityToken}/copilot/${cfg.plan}`;
+    env["COPILOT_API_URL"] = `${cfg.serverUrl}/t/${cfg.identityToken}${tags}/copilot/${cfg.plan}`;
     return env;
   }
 
@@ -133,12 +138,12 @@ export function buildCopilotEnv(
     }
     env["COPILOT_PROVIDER_TYPE"] = "openai";
     env["COPILOT_PROVIDER_WIRE_API"] = "responses";
-    env["COPILOT_PROVIDER_BASE_URL"] = `${cfg.serverUrl}/openai/v1`;
+    env["COPILOT_PROVIDER_BASE_URL"] = `${cfg.serverUrl}${tags}/openai/v1`;
     env["COPILOT_PROVIDER_API_KEY"] = key;
     headers.push(`X-Fest-Token: ${cfg.identityToken}`);
   } else {
     env["COPILOT_PROVIDER_TYPE"] = "anthropic";
-    env["COPILOT_PROVIDER_BASE_URL"] = cfg.serverUrl;
+    env["COPILOT_PROVIDER_BASE_URL"] = `${cfg.serverUrl}${tags}`;
     if (mode === "gw") {
       env["COPILOT_PROVIDER_BEARER_TOKEN"] = cfg.identityToken;
     } else {
@@ -210,12 +215,18 @@ async function detectPlan(env: Readonly<Env>): Promise<CopilotPlan> {
   );
 }
 
-export async function runCopilot(argv: readonly string[], mode: CopilotMode = "subscription"): Promise<void> {
+export async function runCopilot(
+  argv: readonly string[],
+  mode: CopilotMode = "subscription",
+  tagFlags: readonly string[] = [],
+): Promise<void> {
   const cfg = await readCliConfig();
   if (cfg === null) throw new Error("not logged in. Run `fest login` first.");
+  const tags = await sessionTags(tagFlags);
+  note(describeTags(tags));
 
   const plan = mode === "subscription" ? await detectPlan(process.env) : undefined;
-  const env = buildCopilotEnv(process.env, { ...cfg, plan }, mode);
+  const env = buildCopilotEnv(process.env, { ...cfg, plan, tags }, mode);
   const args = copilotArgs(cfg.serverUrl, mode, argv);
   if (mode === "subscription") {
     note(`your Copilot ${plan} plan pays; your GitHub login is relayed to GitHub through Fest, never stored.`);

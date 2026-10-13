@@ -35,6 +35,16 @@ Dispatched from `server/bin/fest.ts`'s `CLIENT_COMMANDS` set, before
   `COPILOT_OFFLINE`: any of them would take the session somewhere else.
   `buildCopilotEnv`, `copilotArgs`, `planFromUserCache` are pure and tested.
   See `docs/COPILOT.md`.
+- `tags.ts` — request tags (`team=…`, `project=…`): `fest tags set|unset`,
+  per directory by default and global with `-g`, saved in `~/.fest/tags.json`
+  (not `config.json`, which login rewrites and logout deletes), plus the
+  precedence chain every client command resolves — repo name < global < saved
+  directories containing the cwd, outermost first < `FEST_TAGS` < leading
+  `--tag` flags. Directories are stored symlink-resolved (`canonicalDir`). The result goes in
+  the `~…` path segment of each command's base URL, never a header, because
+  Copilot on its own login cannot send one. `peelTagFlags`, `resolveTags` and
+  the three builders' `tags` input are pure and tested, including a
+  round-trip through the server's `parseIdentityPath`. See `docs/TAGS.md`.
 - `logout.ts` — deletes the local file only. Never revokes server-side.
 
 ## Maintaining this
