@@ -9,11 +9,15 @@
  * three commands are what you need again on a second machine, and hiding them
  * entirely would mean going to find the README.
  *
- * It shows the SUBSCRIPTION path deliberately, and only that one. Fest's point
- * is that each developer authenticates with their own Claude subscription, so
- * that is the path worth teaching first; the org-credential route exists but
- * needs an operator to have configured routing, and offering both here would
- * ask a reader to choose before they know the difference.
+ * Install and sign-in are the same whichever agent a developer uses; only the
+ * command that starts a session differs. So a Claude Code | Codex | Copilot
+ * switch changes step 3 and the one caveat under it, and nothing else.
+ *
+ * For each agent it shows the path where the developer's OWN credential pays,
+ * and only that one. Fest's point is per-developer pass-through; the
+ * org-credential variants (`gw`) exist but need an operator to have configured
+ * routing, and offering both here would ask a reader to choose before they know
+ * the difference.
  */
 
 import { useState } from "react";
@@ -23,9 +27,77 @@ import { api } from "../lib/api.ts";
 import { BASE_URL } from "../lib/base.ts";
 import { CopyCommand } from "./CopyCommand.tsx";
 import { Button } from "./ui/button.tsx";
+import { ButtonGroup } from "./ui/button-group.tsx";
 
 /** Remembers a deliberate open/close, so the default only applies until then. */
 const EXPANDED_KEY = "fest-setup-cli-expanded";
+
+/** Remembers which agent the reader picked, so it is not reset on every visit. */
+const CLIENT_KEY = "fest-setup-cli-client";
+
+type ClientId = "claude" | "codex" | "copilot";
+
+const Code = ({ children }: { children: React.ReactNode }): React.JSX.Element => (
+  <code className="mono text-foreground">{children}</code>
+);
+
+/** Everything that differs per agent: the session step, and its one caveat. */
+const CLIENTS: ReadonlyArray<{
+  readonly id: ClientId;
+  readonly label: string;
+  readonly name: string;
+  readonly body: string;
+  readonly command: string;
+  readonly note: React.ReactNode;
+}> = [
+  {
+    id: "claude",
+    label: "Claude Code",
+    name: "Claude Code",
+    body: "Runs Claude Code with the environment already pointed here. Your own subscription pays, and Fest never stores your credential.",
+    command: "fest claude",
+    // The one thing that silently defeats the whole design, so it is on the
+    // screen rather than in the docs: either variable makes Claude Code send an
+    // API key, which bills the org and bypasses the subscription.
+    note: (
+      <>
+        Make sure <Code>ANTHROPIC_API_KEY</Code> and <Code>ANTHROPIC_AUTH_TOKEN</Code> are unset —
+        either one drops you off your own subscription onto whatever credential this server holds.
+      </>
+    ),
+  },
+  {
+    id: "codex",
+    label: "Codex",
+    name: "Codex",
+    body: "Runs Codex on its own login, pointed here. A ChatGPT login means your plan pays; an API key means its owner does. Your ~/.codex config is left untouched.",
+    command: "fest codex",
+    note: (
+      <>
+        Sign in to Codex first with <Code>codex login</Code>. On a machine with a ChatGPT login,{" "}
+        <Code>fest codex key</Code> uses your <Code>OPENAI_API_KEY</Code> instead.
+      </>
+    ),
+  },
+  {
+    id: "copilot",
+    label: "Copilot",
+    name: "Copilot CLI",
+    body: "Runs Copilot CLI in bring-your-own-key mode with Fest as its provider. Your API key pays — never your Copilot seat, whose traffic Fest does not relay.",
+    command: "fest copilot",
+    note: (
+      <>
+        Set <Code>ANTHROPIC_API_KEY</Code> to an API key, not a Claude subscription token. Without one,{" "}
+        <Code>fest copilot gw</Code> uses this gateway&apos;s own routes.
+      </>
+    ),
+  },
+];
+
+function storedClient(): ClientId {
+  const raw = localStorage.getItem(CLIENT_KEY);
+  return CLIENTS.some((c) => c.id === raw) ? (raw as ClientId) : "claude";
+}
 
 function storedPreference(): boolean | null {
   const raw = localStorage.getItem(EXPANDED_KEY);
@@ -104,10 +176,16 @@ export function SetupCliToggle({ state }: { state: SetupCliState }): React.JSX.E
 }
 
 export function SetupCliPanel({ state }: { state: SetupCliState }): React.JSX.Element | null {
+  const [clientId, setClientId] = useState<ClientId>(storedClient);
   if (!state.expanded) return null;
 
   const { hasSessions, setExpanded } = state;
   const server = serverUrl();
+  const client = CLIENTS.find((c) => c.id === clientId) ?? CLIENTS[0]!;
+  const pickClient = (id: ClientId): void => {
+    localStorage.setItem(CLIENT_KEY, id);
+    setClientId(id);
+  };
 
   const steps = [
     {
@@ -125,8 +203,8 @@ export function SetupCliPanel({ state }: { state: SetupCliState }): React.JSX.El
     {
       icon: Rocket,
       title: "Start a session",
-      body: "Runs Claude Code with the environment already pointed here. Your own subscription pays, and Fest never stores your credential.",
-      command: "fest claude",
+      body: client.body,
+      command: client.command,
     },
   ];
 
@@ -147,14 +225,30 @@ export function SetupCliPanel({ state }: { state: SetupCliState }): React.JSX.El
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 id="setup-cli-heading" className="text-base font-medium text-foreground">
-              Point Claude Code at Fest
+              Point {client.name} at Fest
             </h2>
             <p className="mt-1 max-w-[68ch] text-[13px] text-muted-foreground">
               {hasSessions
-                ? "Three commands to run Claude Code through this gateway — on a new machine, or for someone you are setting up."
-                : "Nothing has come through on your account yet. Three commands and your next Claude Code session runs through this gateway — on your own subscription, metered here."}
+                ? `Three commands to run ${client.name} through this gateway — on a new machine, or for someone you are setting up.`
+                : `Nothing has come through on your account yet. Three commands and your next ${client.name} session runs through this gateway, metered here.`}
             </p>
           </div>
+          {/* `aria-pressed`, as on the Live controls: three tabbable buttons
+              read correctly without a radiogroup's roving focus. */}
+          <ButtonGroup aria-label="Coding agent" className="-mt-1 shrink-0">
+            {CLIENTS.map((c) => (
+              <Button
+                key={c.id}
+                type="button"
+                size="sm"
+                variant={c.id === clientId ? "default" : "outline"}
+                aria-pressed={c.id === clientId}
+                onClick={() => pickClient(c.id)}
+              >
+                {c.label}
+              </Button>
+            ))}
+          </ButtonGroup>
           <Button
             type="button"
             variant="ghost"
@@ -188,17 +282,9 @@ export function SetupCliPanel({ state }: { state: SetupCliState }): React.JSX.El
           ))}
         </ol>
 
-        {/* The one thing that silently defeats the whole design, so it is on the
-            screen rather than in the docs: either variable makes Claude Code
-            send an API key, which bills the org and bypasses the subscription
-            this page just finished explaining. */}
         <p className="mt-3 flex items-start gap-2 text-[12px] text-muted-foreground">
           <Check className="mt-0.5 size-3.5 shrink-0 text-status-ok" />
-          <span>
-            Make sure <code className="mono text-foreground">ANTHROPIC_API_KEY</code> and{" "}
-            <code className="mono text-foreground">ANTHROPIC_AUTH_TOKEN</code> are unset — either
-            one drops you off your own subscription onto whatever credential this server holds.
-          </span>
+          <span>{client.note}</span>
         </p>
       </div>
     </section>
