@@ -11,10 +11,19 @@
  * stutter in their terminal.
  *
  * It is acceptable here only because of a structural rule: THE REQUEST HOT PATH
- * NEVER TOUCHES THIS DATABASE. Identity lookups are served from an in-memory
- * cache, and usage is handed to a queue that batches into one transaction well
- * off the request path (see server/ingest/sink.ts). The only synchronous
+ * DOES NOT WAIT ON THIS DATABASE. The one statement on it is the identity
+ * lookup (`resolveToken`), a primary-key point read that WAL never makes wait
+ * on the writer. Usage is handed to a queue that batches into one transaction
+ * well off the request path (see server/ingest/sink.ts). The other synchronous
  * queries are the metering writer's batch and the dashboard's own requests.
+ *
+ * With `FEST_WORKERS` > 1 the metering writer is not even in the same process
+ * as the streams: the cluster primary serves no HTTP and is the only process
+ * that writes metering (server/cluster/). That matters because a connection
+ * waiting on another's write lock sleeps in `busy_timeout` ON ITS OWN THREAD —
+ * a worker that wrote metering would park every stream it relays for the
+ * length of the other writer's transaction. Workers write only the low-volume
+ * auth rows (sessions, tokens, audit).
  *
  * So: if you are about to add a `store.db.prepare(...)` call inside a proxied
  * request's lifecycle, don't. Move it behind the queue, or move the database to
@@ -50,7 +59,37 @@ export interface Store {
 
 const MIGRATIONS_DIR = join(import.meta.dirname, "migrations");
 
+/**
+ * The oldest SQLite this store will open.
+ *
+ * 3.51.3 fixed a WAL-reset bug that can corrupt a database when two
+ * connections write or checkpoint at the same instant — which Fest does
+ * whenever a CLI command runs beside the server, and constantly with
+ * `FEST_WORKERS` > 1. The SQLite is the one Node bundles, so the fix for a
+ * refusal here is a newer Node.
+ */
+export const MIN_SQLITE_VERSION = "3.51.3";
+
+/** `a >= b` for dotted numeric versions; a missing part counts as 0. */
+export function versionAtLeast(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+
 export function openStore(path: string): Store {
+  const sqlite = process.versions.sqlite ?? "0";
+  if (!versionAtLeast(sqlite, MIN_SQLITE_VERSION)) {
+    throw new Error(
+      `this Node bundles SQLite ${sqlite}; Fest needs ${MIN_SQLITE_VERSION} or newer ` +
+        `(a WAL bug before it can corrupt a database with more than one connection). Upgrade Node.`,
+    );
+  }
   const db = new DatabaseSync(path);
 
   // Order matters: WAL first so the journal switch happens before anything

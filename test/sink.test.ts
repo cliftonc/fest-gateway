@@ -185,3 +185,20 @@ test("onBatch receives the batch and runs inside the flush, not the hot path", a
   assert.deepEqual(batches, [["a", "b"]]);
   await sink.close();
 });
+
+test("a null path persists through onBatch and writes no trail at all", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "fest-sink-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const batches: string[][] = [];
+  const sink = createUsageSink({
+    path: null,
+    flushMs: 10_000,
+    onBatch: (records) => void batches.push(records.map((r) => r.id)),
+  });
+  sink.record(rec("a"));
+  sink.record(rec("b"));
+  await sink.close();
+  assert.deepEqual(batches, [["a", "b"]]);
+  assert.equal(sink.stats().written, 2);
+  assert.equal(sink.stats().trailErrors, 0, "no trail is not a failing trail");
+});

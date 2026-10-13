@@ -43,11 +43,12 @@ function json(res: ServerResponse, status: number, body: unknown, extra: Record<
 /**
  * Login throttle, in memory and per (email, ip).
  *
- * In memory because Fest is one process per deployment, and putting this in
- * SQLite would let an unauthenticated caller drive writes into the same
- * single-writer database the metering flush needs. The trade is that a restart
- * clears the counters — acceptable against online guessing, which is what this
- * defends; offline guessing is scrypt's job.
+ * In memory, because putting this in SQLite would let an unauthenticated
+ * caller drive writes into the same single-writer database the metering flush
+ * needs. The trades are that a restart clears the counters, and that with
+ * `FEST_WORKERS` > 1 each worker counts separately, so the effective limit is
+ * that many times MAX_ATTEMPTS — both acceptable against online guessing,
+ * which is what this defends; offline guessing is scrypt's job.
  */
 const ATTEMPT_WINDOW_MS = 15 * 60_000;
 const MAX_ATTEMPTS = 10;

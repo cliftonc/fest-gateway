@@ -42,12 +42,18 @@
  *   fest logout                       forget the local login
  */
 
+import cluster from "node:cluster";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { loadConfig, describeConfig } from "../config.ts";
 import type { FestConfig } from "../config.ts";
 import { createUsageSink } from "../ingest/sink.ts";
+import type { SinkStats, UsageSink } from "../ingest/sink.ts";
 import { createLiveBus } from "../ingest/live-bus.ts";
+import type { LiveBus } from "../ingest/live-bus.ts";
+import { runPrimary, ORG_ID_ENV } from "../cluster/primary.ts";
+import { createWorkerLink, withWriterStats } from "../cluster/worker.ts";
+import { isToWorker } from "../cluster/messages.ts";
 import { createServer } from "../http/server.ts";
 import { log, setLogLevel } from "../log.ts";
 import { openStore, migrate } from "../store/db.ts";
@@ -111,13 +117,53 @@ async function loadRoutes(cfg: FestConfig): Promise<RouteTable> {
   return table;
 }
 
+/**
+ * How long an in-flight request may keep the process alive on shutdown.
+ *
+ * Long enough not to guillotine a developer mid-turn; short enough that
+ * `node --watch` feels like a restart rather than a hang.
+ */
+const DRAIN_GRACE_MS = 5_000;
+
+function banner(cfg: FestConfig, routes: RouteTable): string {
+  return (
+    `fest: http://${cfg.host}:${cfg.port}  ->  ${cfg.upstreamBaseUrl}\n` +
+    `  db: ${cfg.dbPath}   identity required: ${cfg.requireIdentity}` +
+    (cfg.workers > 1 ? `   workers: ${cfg.workers}` : "") +
+    "\n" +
+    `  retention: requests ${DEFAULT_RETENTION.requestDays}d, rollups ${DEFAULT_RETENTION.rollupDays}d\n` +
+    `  routing: ${
+      routes.routes.length === 0
+        ? "none — every request passes through on the caller's own credential"
+        : `${routes.routes.length} route(s) via ${cfg.routesPath} (v${routes.version})`
+    }\n` +
+    `point Claude Code at it with:\n` +
+    `  ANTHROPIC_BASE_URL=http://${cfg.host}:${cfg.port}/t/<your-token>\n` +
+    `and do NOT set ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN (either disables your subscription)`
+  );
+}
+
+/**
+ * `fest serve`, in one of three shapes:
+ *
+ *  - single process (`FEST_WORKERS` unset or 1): everything below, in one place.
+ *  - cluster primary (`FEST_WORKERS` > 1): boot, migrate and the boot-time
+ *    refusals happen here exactly once, then server/cluster/primary.ts forks the
+ *    workers and becomes the one metering writer. It never listens itself.
+ *  - cluster worker: the same `fest serve` command re-run by `cluster.fork()`,
+ *    which detects that it is a worker and serves HTTP with its usage sent to
+ *    the primary.
+ */
 async function cmdServe(cfg: FestConfig): Promise<void> {
+  if (cluster.isWorker) {
+    await serveWorker(cfg);
+    return;
+  }
+
+  // Loaded here even in cluster mode, where only the workers route: a broken
+  // table must stop the process before any worker exists, where an operator is
+  // watching (see loadRoutes).
   const routes = await loadRoutes(cfg);
-  // Edits to routes.json take effect without a restart. `node --watch` only
-  // tracks imported .ts files, so without this an edit appeared to do nothing —
-  // which reads as "my config is wrong" rather than "it has not been loaded".
-  const routeWatcher =
-    cfg.routesPath === null ? null : watchRoutes(cfg.routesPath, routes);
   const store = await withStore(cfg);
   const org = ensureOrg(store);
 
@@ -140,6 +186,20 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
         "  (in Docker: docker compose run --rm fest admin create you@corp.test)\n" +
         "or bind to loopback (FEST_HOST=127.0.0.1) for a single-developer trial.",
     );
+  }
+
+  if (cfg.workers > 1) {
+    await runPrimary({
+      cfg,
+      store,
+      orgId: org.id,
+      drainGraceMs: DRAIN_GRACE_MS,
+      announce: () => {
+        log.info("fest listening", describeConfig(cfg));
+        out(banner(cfg, routes));
+      },
+    });
+    return;
   }
 
   // Prices load synchronously from the vendored snapshot before the first
@@ -174,24 +234,108 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     },
   });
 
+  startHttp({
+    cfg,
+    routes,
+    store,
+    orgId: org.id,
+    bus,
+    sink,
+    touchToken: (id) => lastUsed.touch(id),
+    afterSinkClosed: async () => {},
+    stop: () => {
+      retention.stop();
+      priceRefresh.stop();
+      lastUsed.stop();
+      store.close();
+    },
+    announce: true,
+  });
+}
+
+/**
+ * A cluster worker: the HTTP server, minus everything that must run once.
+ *
+ * No migrations (the primary ran them before forking), no retention, no price
+ * refresh, no metering writes — see server/cluster/primary.ts for why the
+ * writer is elsewhere. Its own store connection serves the dashboard's reads,
+ * identity lookups and the low-volume auth writes.
+ */
+async function serveWorker(cfg: FestConfig): Promise<void> {
+  const orgId = process.env[ORG_ID_ENV];
+  if (orgId === undefined || orgId === "") {
+    throw new Error(`cluster worker started without ${ORG_ID_ENV}; it must be forked by fest serve`);
+  }
+  const routes = await loadRoutes(cfg);
+  const store = openStore(cfg.dbPath);
+
+  const pricing = pricingOptionsFromEnv(cfg.dbPath);
+  loadPrices(pricing);
+
+  const link = createWorkerLink();
+  const bus = createLiveBus();
+  // No trail here: the primary keeps the one JSONL file. A throw from send()
+  // means the primary is gone, and the sink's requeue holds the batch.
+  const local = createUsageSink({ path: null, onBatch: (records) => link.send({ t: "usage", records }) });
+  let writerStats: SinkStats | null = null;
+  const sink = withWriterStats(local, () => writerStats, () => link.lost());
+
+  process.on("message", (msg: unknown) => {
+    if (!isToWorker(msg)) return;
+    if (msg.t === "live") bus.publish(msg.records);
+    else if (msg.t === "prices") loadPrices(pricing);
+    else writerStats = msg.stats;
+  });
+
+  startHttp({
+    cfg,
+    routes,
+    store,
+    orgId,
+    bus,
+    sink,
+    touchToken: (id) => link.send({ t: "touch", tokenId: id }),
+    // The final flush went out on an asynchronous channel; let it leave before
+    // the exit that would otherwise discard it.
+    afterSinkClosed: () => link.drained(2_000),
+    stop: () => store.close(),
+    announce: false,
+  });
+}
+
+interface HttpDeps {
+  readonly cfg: FestConfig;
+  readonly routes: RouteTable;
+  readonly store: Store;
+  readonly orgId: string;
+  readonly bus: LiveBus;
+  readonly sink: UsageSink;
+  readonly touchToken: (tokenId: string) => void;
+  /** Runs after the sink has drained, before `stop`. */
+  readonly afterSinkClosed: () => Promise<void>;
+  /** Releases whatever this process owns beyond the server itself. */
+  readonly stop: () => void;
+  /** Print the banner on listen. A cluster primary prints it once instead. */
+  readonly announce: boolean;
+}
+
+function startHttp(deps: HttpDeps): void {
+  const { cfg, routes, store, bus, sink } = deps;
+  // Edits to routes.json take effect without a restart. `node --watch` only
+  // tracks imported .ts files, so without this an edit appeared to do nothing —
+  // which reads as "my config is wrong" rather than "it has not been loaded".
+  const routeWatcher = cfg.routesPath === null ? null : watchRoutes(cfg.routesPath, routes);
+
   const server = createServer({
     config: cfg,
     sink,
     bus,
     routes: routeWatcher === null ? routes : () => routeWatcher.current(),
-    orgId: org.id,
+    orgId: deps.orgId,
     store,
     resolveIdentity: (raw) => resolveToken(store, raw),
-    touchToken: (id) => lastUsed.touch(id),
+    touchToken: deps.touchToken,
   });
-
-  /**
-   * How long an in-flight request may keep the process alive on shutdown.
-   *
-   * Long enough not to guillotine a developer mid-turn; short enough that
-   * `node --watch` feels like a restart rather than a hang.
-   */
-  const DRAIN_GRACE_MS = 5_000;
 
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
@@ -199,16 +343,19 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
     shuttingDown = true;
     log.info("shutting down", { signal });
 
+    let finished = false;
     const finish = (): void => {
-      void sink.close().then(() => {
-        retention.stop();
-        priceRefresh.stop();
-        routeWatcher?.stop();
-        lastUsed.stop();
-        store.close();
-        log.info("drained", { sink: sink.stats() });
-        process.exit(0);
-      });
+      if (finished) return;
+      finished = true;
+      void sink
+        .close()
+        .then(() => deps.afterSinkClosed())
+        .then(() => {
+          routeWatcher?.stop();
+          deps.stop();
+          log.info("drained", { sink: sink.stats() });
+          process.exit(0);
+        });
     };
 
     server.close(finish);
@@ -238,20 +385,9 @@ async function cmdServe(cfg: FestConfig): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   server.listen(cfg.port, cfg.host, () => {
+    if (!deps.announce) return;
     log.info("fest listening", describeConfig(cfg));
-    out(
-      `fest: http://${cfg.host}:${cfg.port}  ->  ${cfg.upstreamBaseUrl}\n` +
-        `  db: ${cfg.dbPath}   identity required: ${cfg.requireIdentity}\n` +
-        `  retention: requests ${DEFAULT_RETENTION.requestDays}d, rollups ${DEFAULT_RETENTION.rollupDays}d\n` +
-        `  routing: ${
-          routes.routes.length === 0
-            ? "none — every request passes through on the caller's own credential"
-            : `${routes.routes.length} route(s) via ${cfg.routesPath} (v${routes.version})`
-        }\n` +
-        `point Claude Code at it with:\n` +
-        `  ANTHROPIC_BASE_URL=http://${cfg.host}:${cfg.port}/t/<your-token>\n` +
-        `and do NOT set ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN (either disables your subscription)`,
-    );
+    out(banner(cfg, routes));
   });
 }
 

@@ -127,7 +127,7 @@ export interface PriceRefresher {
  * exit, and a short-lived CLI command that happens to load the table should not
  * hang for 24 hours waiting for a tick.
  */
-export function startPriceRefresh(opts: PricingOptions): PriceRefresher {
+export function startPriceRefresh(opts: PricingOptions, onRefreshed?: () => void): PriceRefresher {
   if (!opts.refreshEnabled) {
     log.info("price refresh disabled", { reason: "FEST_PRICING_REFRESH" });
     return { stop: () => {} };
@@ -136,8 +136,14 @@ export function startPriceRefresh(opts: PricingOptions): PriceRefresher {
   const timers: NodeJS.Timeout[] = [];
 
   // Deferred rather than awaited: boot must not wait on GitHub.
-  timers.push(setTimeout(() => void refreshPricesOnce(opts), 0).unref());
-  timers.push(setInterval(() => void refreshPricesOnce(opts), DAY_MS).unref());
+  // `onRefreshed` is how a cluster primary tells its workers to re-read the
+  // cache this just wrote; each worker prices its own requests.
+  const tick = (): void =>
+    void refreshPricesOnce(opts).then((ok) => {
+      if (ok) onRefreshed?.();
+    });
+  timers.push(setTimeout(tick, 0).unref());
+  timers.push(setInterval(tick, DAY_MS).unref());
 
   return {
     stop: () => {

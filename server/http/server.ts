@@ -7,6 +7,7 @@
  * Code calls `/v1/messages?beta=true`, not `/v1/messages`.
  */
 
+import cluster from "node:cluster";
 import http from "node:http";
 import type { Server } from "node:http";
 import { parseIdentityPath } from "../auth/posture.ts";
@@ -201,7 +202,9 @@ export function createServer(deps: ServerDeps): Server {
 
         if (path === "/healthz") {
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: true, sink: deps.sink.stats() }));
+          // `worker` is the cluster worker that answered (null in a single process):
+          // with FEST_WORKERS > 1 each health check lands on one of them.
+          res.end(JSON.stringify({ ok: true, worker: cluster.worker?.id ?? null, sink: deps.sink.stats() }));
           return;
         }
 

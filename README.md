@@ -132,6 +132,7 @@ docker compose run --rm fest token list | token revoke <id>
 | `FEST_SECURE_COOKIES` | set behind HTTPS. |
 | `FEST_ROUTES` | routing table path. Absent means everything passes through. See [docs/ROUTING.md](docs/ROUTING.md). |
 | `FEST_UPSTREAM_BASE_URL`, `FEST_LOG_LEVEL` | |
+| `FEST_WORKERS` | HTTP worker processes: a number, or `auto` for one per core. Default `1`. See [More than one core](#more-than-one-core). |
 | `FEST_BEDROCK_BASE_URL` | opens the `/bedrock` mount, relaying Claude-in-Bedrock traffic on the *caller's* AWS credential. Must include Bedrock's `/anthropic` segment. Unset means the mount refuses. |
 | `FEST_OPENAI_BASE_URL`, `FEST_CHATGPT_BASE_URL` | where the `/openai` (Codex on an API key) and `/chatgpt` (Codex on a ChatGPT login) mounts relay. Default `https://api.openai.com` and `https://chatgpt.com`; `off` refuses. See [docs/CODEX.md](docs/CODEX.md). |
 | `FEST_COPILOT_BASE_URL`, `FEST_COPILOT_MCP_BASE_URL` | where the `/copilot/<plan>` mount (Copilot CLI on its own login) and the root `/mcp` relay (its built-in GitHub MCP server) go. Default `https://api.{plan}.githubcopilot.com` and `https://api.githubcopilot.com`; `off` refuses. See [docs/COPILOT.md](docs/COPILOT.md). |
@@ -145,6 +146,28 @@ docker compose run --rm fest token list | token revoke <id>
 | `FEST_DASHBOARD_URL` | **dev only.** Where the dashboard is when it isn't this server; `npm run dev` puts it on Vite's port. Leave unset in production. |
 
 For the full OAuth setup, see [docs/CLI-AUTH.md](docs/CLI-AUTH.md).
+
+### More than one core
+
+One process relays a lot of streams, because relaying is mostly waiting on the
+network. When it isn't enough, set `FEST_WORKERS` (or `auto`). `fest serve`
+then becomes a small primary that forks that many HTTP workers onto the same
+port with `node:cluster`.
+
+- **One writer.** SQLite takes one writer at a time, and a process waiting for
+  the lock stalls every stream it relays. So workers send their usage to the
+  primary, which serves no HTTP and is the only process that writes metering.
+  It also runs migrations, retention and the price refresh, exactly once.
+- **One host, one local disk.** Every process opens the same database file in
+  WAL mode, which needs shared memory. Don't put `/data` on NFS, EFS or any
+  other network filesystem. Spreading across machines needs a different
+  database, which Fest doesn't support yet.
+- **A crash costs one worker's streams.** The primary respawns it, backing off
+  if it keeps crashing. Stopping the container drains every worker the same
+  way a single process drains.
+- **Per worker, not shared:** the login throttle counts attempts per worker,
+  so the effective limit is that many times higher. `/healthz` reports the
+  worker that answered. Log lines from a worker carry its `worker` id.
 
 ### Behind a reverse proxy, on a path
 

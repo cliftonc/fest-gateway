@@ -9,6 +9,7 @@
  * should already have happened upstream.
  */
 
+import cluster from "node:cluster";
 import { redactSecrets } from "./secret/fingerprint.ts";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -21,9 +22,12 @@ export function setLogLevel(level: LogLevel): void {
   threshold = LEVEL_ORDER[level];
 }
 
+/** Which cluster worker wrote a line; absent in a single process and the primary. */
+const WORKER: { worker?: number } = cluster.worker === undefined ? {} : { worker: cluster.worker.id };
+
 function emit(level: LogLevel, msg: string, fields?: Record<string, unknown>): void {
   if (LEVEL_ORDER[level] < threshold) return;
-  const line = JSON.stringify({ at: new Date().toISOString(), level, msg, ...fields });
+  const line = JSON.stringify({ at: new Date().toISOString(), level, msg, ...WORKER, ...fields });
   const safe = redactSecrets(line);
   // Logs go to stderr so stdout stays free for machine-readable output.
   process.stderr.write(safe + "\n");

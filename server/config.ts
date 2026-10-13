@@ -6,6 +6,8 @@
  * developer's request.
  */
 
+import { availableParallelism } from "node:os";
+
 export interface FestConfig {
   readonly port: number;
   readonly host: string;
@@ -121,6 +123,13 @@ export interface FestConfig {
    * substitute path, so "nobody configured this" must mean "off", not "open".
    */
   readonly allowedEmailDomains: readonly string[];
+  /**
+   * HTTP worker processes. 1 — the default — is the single process Fest has
+   * always been. Above 1, `fest serve` becomes a cluster primary that serves no
+   * HTTP itself and is the only process that writes metering, so workers never
+   * wait on SQLite's write lock with streams in flight. See server/cluster/.
+   */
+  readonly workers: number;
 }
 
 /**
@@ -193,6 +202,18 @@ function codexUpstreamFromEnv(name: string, fallback: string): string | null {
     throw new Error(`${name} must be https (a developer's credential would otherwise cross the network in plaintext)`);
   }
   return raw.replace(/\/+$/, "");
+}
+
+/** `FEST_WORKERS`: unset or blank -> 1, a positive integer, or `auto` (one per core). */
+export function workersFromEnv(raw: string | undefined, cores: number = availableParallelism()): number {
+  if (raw === undefined || raw.trim() === "") return 1;
+  const v = raw.trim().toLowerCase();
+  if (v === "auto") return Math.max(1, cores);
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`FEST_WORKERS must be a positive integer or "auto", got ${JSON.stringify(raw)}`);
+  }
+  return n;
 }
 
 function listFromEnv(name: string): readonly string[] {
@@ -274,6 +295,7 @@ export function loadConfig(): FestConfig {
     githubClientId: stringFromEnv("FEST_GITHUB_CLIENT_ID"),
     githubClientSecret: stringFromEnv("FEST_GITHUB_CLIENT_SECRET"),
     allowedEmailDomains: listFromEnv("FEST_ALLOWED_EMAIL_DOMAINS"),
+    workers: workersFromEnv(process.env.FEST_WORKERS),
   };
 }
 

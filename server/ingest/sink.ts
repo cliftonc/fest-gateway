@@ -39,7 +39,11 @@ export interface UsageSink {
 }
 
 export interface SinkOptions {
-  readonly path: string;
+  /**
+   * The JSONL trail, or null for none — a cluster worker's sink only forwards
+   * to the primary, which keeps the one trail file (see server/cluster/).
+   */
+  readonly path: string | null;
   readonly flushMs?: number;
   readonly maxQueue?: number;
   readonly maxBatch?: number;
@@ -114,12 +118,14 @@ export function createUsageSink(opts: SinkOptions): UsageSink {
     // The JSONL file is a convenience trail, not the record. Its failure is
     // logged and counted but never requeues the batch: retrying purely for the
     // trail's sake would re-run onBatch and duplicate rows in the store.
-    try {
-      const payload = batch.map((r) => JSON.stringify(r)).join("\n") + "\n";
-      await appendFile(opts.path, payload, "utf8");
-    } catch (err) {
-      trailErrors += 1;
-      log.warn("usage trail write failed", { error: String(err).slice(0, 200), trailErrors });
+    if (opts.path !== null) {
+      try {
+        const payload = batch.map((r) => JSON.stringify(r)).join("\n") + "\n";
+        await appendFile(opts.path, payload, "utf8");
+      } catch (err) {
+        trailErrors += 1;
+        log.warn("usage trail write failed", { error: String(err).slice(0, 200), trailErrors });
+      }
     }
 
     if (persisted) {

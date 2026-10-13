@@ -6,7 +6,9 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
 
 ## Subsystems
 
-- **`bin/fest.ts`** — the CLI entrypoint. Server-operator commands (`serve`,
+- **`bin/fest.ts`** — the CLI entrypoint. `cmdServe` runs as a single
+  process, a cluster primary, or a forked worker (`cluster.isWorker`) — the
+  shared HTTP setup is `startHttp`. Server-operator commands (`serve`,
   `migrate`, `token`, `admin`, `seed`) load `FestConfig` via `loadConfig()`;
   developer commands (`login`, `whoami`, `claude`, `codex`, `copilot`,
   `logout`) dispatch to
@@ -88,6 +90,17 @@ dependencies beyond `arctic` and `open` (the latter only reachable from
   `live-bus.ts` (publishes from the sink's flush, never from the request
   path, so a slow dashboard subscriber can never add latency to a
   developer's live turn).
+- **`cluster/`** — `FEST_WORKERS` > 1. `primary.ts` forks the HTTP workers,
+  respawns them, and is the ONLY process that writes metering (plus
+  retention, the price refresh and `last_used_at`); it serves no HTTP.
+  `worker.ts` is a worker's IPC link: its sink forwards batches up instead of
+  writing, and `stats()` merges the writer's health in. `messages.ts` is the
+  whole IPC vocabulary. The one-writer rule exists because a connection
+  waiting on SQLite's write lock sleeps on its own thread — a worker that
+  wrote metering would stall the streams it relays. Anything new that must
+  run once, or that a worker would otherwise share through memory, goes
+  through the primary; per-worker state that is acceptable as such (the login
+  throttle) is documented in the README rather than built.
 - **`secret/`** — `fingerprint.ts` (one definition of "this looks like a
   secret," used by the log redactor and the leak tests) and
   `non-persistable.ts` (a wrapper whose `toString`/`toJSON` always redact).
