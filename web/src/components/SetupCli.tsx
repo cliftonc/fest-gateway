@@ -83,12 +83,13 @@ const CLIENTS: ReadonlyArray<{
     id: "copilot",
     label: "Copilot",
     name: "Copilot CLI",
-    body: "Runs Copilot CLI in bring-your-own-key mode with Fest as its provider. Your API key pays — never your Copilot seat, whose traffic Fest does not relay.",
+    body: "Runs Copilot CLI on its own GitHub login, pointed here. Your Copilot plan pays; your GitHub token is passed through to GitHub and never stored.",
     command: "fest copilot",
     note: (
       <>
-        Set <Code>ANTHROPIC_API_KEY</Code> to an API key, not a Claude subscription token. Without one,{" "}
-        <Code>fest copilot gw</Code> uses this gateway&apos;s own routes.
+        Sign in to Copilot first with <Code>copilot</Code> and <Code>/login</Code>. To pay with a
+        model key instead, <Code>fest copilot anthropic</Code> uses your <Code>ANTHROPIC_API_KEY</Code>{" "}
+        and <Code>fest copilot gw</Code> uses this gateway&apos;s own routes.
       </>
     ),
   },
