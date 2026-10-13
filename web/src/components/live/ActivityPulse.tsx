@@ -208,7 +208,7 @@ export function ActivityPulse({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 transition-opacity ${
+      className={`relative overflow-hidden rounded-lg bg-card ring-1 ring-foreground/10 transition-opacity ${
         live ? "" : "opacity-60"
       }`}
     >

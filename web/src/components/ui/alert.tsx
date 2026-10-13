@@ -3,17 +3,19 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 const alertVariants = cva(
-  "group/alert relative grid w-full gap-0.5 rounded-lg border px-2.5 py-2 text-left text-sm has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
+  "group/alert relative grid w-full gap-0.5 rounded-md border px-2.5 py-2 text-left text-sm has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-card text-card-foreground",
+        // Tinted surfaces, per the brand — and never a coloured left-border
+        // stripe, which it bans outright.
+        default: "border-border bg-muted text-foreground",
         destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+          "border-destructive/30 bg-tint-bad text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
         // A warning is not a failure: the routing table still works, somebody
         // just needs to know the org paid for it.
         warning:
-          "border-status-warn/40 bg-card text-status-warn *:data-[slot=alert-description]:text-status-warn/90 *:[svg]:text-current",
+          "border-status-warn/40 bg-tint-warn text-status-warn *:data-[slot=alert-description]:text-status-warn/90 *:[svg]:text-current",
       },
     },
     defaultVariants: {

@@ -16,11 +16,21 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
   )
 }
 
+// The brand's table head: a green band in Midnight Bitter — the one place a
+// serif is allowed in this dashboard — over rows with no zebra striping.
+//
+// The band's weight is turned down by the --table-head tokens rather than here,
+// because what it should be differs by theme (see styles.css). The vivid green
+// stays as the rule under the header in both, which is what keeps it reading as
+// the brand at a glance.
 function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      className={cn("[&_tr]:border-b", className)}
+      className={cn(
+        "bg-table-head text-table-head-foreground [&_tr]:border-b-2 [&_tr]:border-table-head-rule",
+        className
+      )}
       {...props}
     />
   )
@@ -67,7 +77,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
+        "h-9 px-2 text-left align-middle font-serif text-[0.8125rem] font-bold whitespace-nowrap text-current first:rounded-tl-md last:rounded-tr-md [&:has([role=checkbox])]:pr-0",
         className
       )}
       {...props}

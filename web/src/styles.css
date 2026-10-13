@@ -2,10 +2,12 @@
  * Tailwind entry point and the design tokens everything else reads.
  *
  * Structure and token names are shadcn's defaults, so `npx shadcn add <x>`
- * keeps working without hand-patching every generated component. Only the
- * *values* are ours: Nearform navy/green instead of the neutral preset.
+ * keeps working without hand-patching every generated component. The *values*
+ * are not ours either: every one of them resolves to a Nearform brand token
+ * from `nearform-brand.css`. Nothing in this file may name a colour directly —
+ * a hex here is a colour that drifts the next time the brand moves.
  *
- * Two token sets live here and they are deliberately not merged:
+ * Three token sets live here and they are deliberately not merged:
  *
  *  - shadcn's UI-role tokens (`--background`, `--primary`, `--destructive`…),
  *    which say what a piece of chrome is for.
@@ -14,6 +16,7 @@
  *    is always paired with text, because "the red one" is not information an
  *    admin can act on over a screen share, and half of them cannot see it
  *    anyway.
+ *  - The brand's own `--nf-*` tokens, which are read-only input to both.
  *
  * Collapsing the second set into the first would lose the distinction between
  * "this badge is the accent colour" and "this request ran on a server-held
@@ -24,133 +27,165 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+@import "./nearform-brand.css";
+
 @import "@fontsource/inter/latin-400.css";
 @import "@fontsource/inter/latin-500.css";
 @import "@fontsource/inter/latin-600.css";
 @import "@fontsource/inter/latin-700.css";
+/* Bitter is the brand's serif and earns its place in one role: table headers.
+   Nothing else in the dashboard is allowed to reach for it. */
+@import "@fontsource/bitter/latin-700.css";
 
 /* The theme is an explicit class on <html>, not a media query: an operator on
-   a light-mode laptop still wants the dark dashboard on the wall display. */
+   a light-mode laptop still wants the dark dashboard on the wall display. The
+   brand tokens flip on `[data-theme="dark"]` instead, so both are set. */
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* Cards and panels sit on the brand's 10px radius; controls take 8px, which
+     is what `--radius-md` works out to below. */
   --radius: 0.625rem;
 
-  --background: #f6f8fa;
-  --foreground: #1f2328;
-  --card: #ffffff;
-  --card-foreground: #1f2328;
-  --popover: #ffffff;
-  --popover-foreground: #1f2328;
+  /* Canvas is the raised brand surface and cards are plain white — the page is
+     the quiet layer and the panels on it are the lit ones. */
+  --background: var(--nf-surface-raised);
+  --foreground: var(--nf-text);
+  --card: var(--nf-surface);
+  --card-foreground: var(--nf-text);
+  --popover: var(--nf-surface);
+  --popover-foreground: var(--nf-text);
 
-  /* The darker Nearform green. The vivid #00e5a4 on white fails contrast, and
-     the brand guide warns off green-on-white text specifically. */
-  --primary: #07a06f;
-  --primary-foreground: #ffffff;
+  /* Brand law: Midnight on Green, never white on green. That is also what makes
+     the vivid green usable in light mode — as a *backing* for dark text, which
+     clears contrast easily, where green text on white never would. */
+  --primary: var(--nf-green);
+  --primary-foreground: var(--nf-midnight);
 
-  --secondary: #f0f3f6;
-  --secondary-foreground: #1f2328;
-  --muted: #f0f3f6;
-  --muted-foreground: #636c76;
-  --accent: #f0f3f6;
-  --accent-foreground: #1f2328;
-  --destructive: #cf222e;
-  --destructive-foreground: #ffffff;
-  --border: #d8dee4;
-  --input: #d8dee4;
-  --ring: #07a06f;
+  --secondary: var(--nf-grey-10);
+  --secondary-foreground: var(--nf-text);
+  --muted: var(--nf-grey-10);
+  --muted-foreground: var(--nf-text-secondary);
+  --accent: var(--nf-grey-10);
+  --accent-foreground: var(--nf-text);
+  --destructive: var(--nf-danger-fg);
+  --destructive-foreground: var(--nf-white);
+  --border: var(--nf-border);
+  --input: var(--nf-border);
+  /* Blue in light, green in dark — the brand picks the focus colour that the
+     surface underneath can actually carry. */
+  --ring: var(--nf-focus);
 
-  /* Status tones. The old accent blue is not gone — it became --status-info,
-     because "informational" and "the brand colour" are different jobs and the
-     charts need both. */
-  --status-ok: #1a7f37;
-  --status-warn: #9a6700;
-  --status-bad: #cf222e;
-  --status-info: #0969da;
-  --status-sub: #8250df;
+  /* Anything that reads as a link. Distinct from --primary on purpose: green is
+     a backing colour, blue is the colour text is allowed to be. */
+  --link: var(--nf-link);
 
-  --chart-1: #07a06f;
-  --chart-2: #0969da;
-  --chart-3: #8250df;
-  --chart-4: #9a6700;
-  --chart-5: #636c76;
+  /* Status tones, on the brand's status palette. `--status-info` is blue and
+     `--primary` is green because "informational" and "the brand colour" are
+     different jobs, and the charts need both. */
+  --status-ok: var(--nf-success-fg);
+  --status-warn: var(--nf-warning-fg);
+  --status-bad: var(--nf-danger-fg);
+  --status-info: var(--nf-link);
+  --status-sub: var(--nf-purple);
+
+  /* Alert tints. The brand states an alert as a tinted surface with a status
+     icon — never as a coloured left-border stripe, which is banned outright.
+     These are surfaces, so they are their own tokens rather than a translucent
+     --status-* : a status colour at 10% over an unknown background is not a
+     colour anyone specified. */
+  --tint-ok: var(--nf-success-10);
+  --tint-warn: var(--nf-warning-10);
+  --tint-bad: var(--nf-danger-10);
+  --tint-info: var(--nf-blue-10);
+  --tint-sub: var(--nf-purple-10);
+
+  /* The table head is the one component with its own tokens, because it is the
+     one place the brand puts a full band of colour and this dashboard shows
+     three tables to a screen at 1400px. The brand's table spec assumes a
+     1120px container and a page with one or two: at this width and repetition
+     the solid green stops being an accent, so the band drops to the pastel
+     tier with the vivid green kept as the rule beneath it. */
+  --table-head: var(--nf-green-30);
+  --table-head-foreground: var(--nf-midnight);
+  --table-head-rule: var(--nf-green);
+
+  --chart-1: var(--nf-green);
+  --chart-2: var(--nf-link);
+  --chart-3: var(--nf-purple);
+  --chart-4: var(--nf-warning-fg);
+  --chart-5: var(--nf-text-secondary);
 
   /* Categorical, for naming one model apart from another. Deliberately no
      green: the token-bucket bars are a ramp of the brand green, and a model
      that happened to be green would be indistinguishable from "output tokens"
-     in the chart directly above the one explaining it. */
-  --model-1: #0969da;
-  --model-2: #8250df;
-  --model-3: #9a6700;
-  --model-4: #bf3989;
-  --model-5: #0598a6;
+     in the chart directly above the one explaining it. The brand's accent
+     palette is two hues wide, so the spread runs blue → purple → amber and then
+     down the Midnight shades rather than inventing a sixth hue. */
+  --model-1: var(--nf-blue);
+  --model-2: var(--nf-purple);
+  --model-3: var(--nf-warning-fg);
+  --model-4: var(--nf-midnight-80);
+  --model-5: var(--nf-midnight-50);
 
-  --sidebar: #ffffff;
-  --sidebar-foreground: #1f2328;
-  --sidebar-primary: #07a06f;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f0f3f6;
-  --sidebar-accent-foreground: #1f2328;
-  --sidebar-border: #d8dee4;
-  --sidebar-ring: #07a06f;
+  --sidebar: var(--nf-surface);
+  --sidebar-foreground: var(--nf-text);
+  --sidebar-primary: var(--nf-green);
+  --sidebar-primary-foreground: var(--nf-midnight);
+  --sidebar-accent: var(--nf-grey-10);
+  --sidebar-accent-foreground: var(--nf-text);
+  --sidebar-border: var(--nf-border);
+  --sidebar-ring: var(--nf-focus);
 }
 
+/*
+ * Dark is not the light mapping with flipped values: the brand's neutral dark
+ * tier stacks bg → surface → raised, so the canvas is the *darkest* layer and
+ * panels rise out of it. Only the roles whose direction changes are repeated
+ * here; the rest already flip inside `nearform-brand.css`.
+ */
 .dark {
-  --background: #0e1116;
-  --foreground: #e6edf3;
-  --card: #161b22;
-  --card-foreground: #e6edf3;
-  --popover: #161b22;
-  --popover-foreground: #e6edf3;
+  --background: var(--nf-dark-bg);
+  --card: var(--nf-dark-surface);
+  --popover: var(--nf-dark-surface);
 
-  /* Nearform green, paired with deep navy the way the logo pairs them. */
-  --primary: #00e5a4;
-  --primary-foreground: #000e38;
+  --secondary: var(--nf-dark-raised);
+  --muted: var(--nf-dark-raised);
+  --accent: var(--nf-dark-raised);
+  --destructive-foreground: var(--nf-white);
 
-  --secondary: #1c232c;
-  --secondary-foreground: #e6edf3;
-  --muted: #1c232c;
-  --muted-foreground: #8b949e;
-  --accent: #1c232c;
-  --accent-foreground: #e6edf3;
-  --destructive: #f85149;
-  --destructive-foreground: #ffffff;
-  --border: #2a323d;
-  --input: #2a323d;
-  --ring: #00e5a4;
+  --status-sub: var(--nf-purple-80);
 
-  --status-ok: #3fb950;
-  --status-warn: #d29922;
-  --status-bad: #f85149;
-  --status-info: #58a6ff;
-  --status-sub: #a371f7;
+  /* On dark the tints are mixed into the panel rather than lifted from the
+     light palette: a pastel wash here would be a light patch on a dark screen. */
+  --tint-ok: color-mix(in srgb, var(--nf-green) 12%, var(--nf-dark-surface));
+  --tint-warn: color-mix(in srgb, var(--nf-warning) 16%, var(--nf-dark-surface));
+  --tint-bad: color-mix(in srgb, var(--nf-danger) 16%, var(--nf-dark-surface));
+  --tint-info: color-mix(in srgb, var(--nf-blue) 16%, var(--nf-dark-surface));
+  --tint-sub: color-mix(in srgb, var(--nf-purple) 20%, var(--nf-dark-surface));
 
-  --chart-1: #00e5a4;
-  --chart-2: #58a6ff;
-  --chart-3: #a371f7;
-  --chart-4: #d29922;
-  --chart-5: #8b949e;
+  /* Dark inverts the band rather than repeating it: a pastel green bar on a
+     near-black page is a light patch, and green *text* on dark is sanctioned —
+     only green on white is banned. */
+  --table-head: var(--nf-dark-raised);
+  --table-head-foreground: var(--nf-green);
 
-  /* See the light-mode block: categorical, and never green. */
-  --model-1: #58a6ff;
-  --model-2: #a371f7;
-  --model-3: #d29922;
-  --model-4: #f778ba;
-  --model-5: #39c5cf;
+  --chart-5: var(--nf-midnight-30);
 
-  --sidebar: #161b22;
-  --sidebar-foreground: #e6edf3;
-  --sidebar-primary: #00e5a4;
-  --sidebar-primary-foreground: #000e38;
-  --sidebar-accent: #1c232c;
-  --sidebar-accent-foreground: #e6edf3;
-  --sidebar-border: #2a323d;
-  --sidebar-ring: #00e5a4;
+  --model-1: var(--nf-blue-50);
+  --model-2: var(--nf-purple-80);
+  --model-3: var(--nf-warning-fg);
+  --model-4: var(--nf-blue-30);
+  --model-5: var(--nf-midnight-30);
+
+  --sidebar: var(--nf-dark-surface);
+  --sidebar-accent: var(--nf-dark-raised);
 }
 
 @theme inline {
-  --font-sans: Inter, ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --font-sans: var(--nf-font-sans);
+  --font-mono: var(--nf-font-mono);
+  --font-serif: var(--nf-font-serif);
   --font-heading: var(--font-sans);
 
   --color-background: var(--background);
@@ -172,6 +207,17 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-link: var(--link);
+
+  --color-tint-ok: var(--tint-ok);
+  --color-tint-warn: var(--tint-warn);
+  --color-tint-bad: var(--tint-bad);
+  --color-tint-info: var(--tint-info);
+  --color-tint-sub: var(--tint-sub);
+
+  --color-table-head: var(--table-head);
+  --color-table-head-foreground: var(--table-head-foreground);
+  --color-table-head-rule: var(--table-head-rule);
 
   --color-status-ok: var(--status-ok);
   --color-status-warn: var(--status-warn);
@@ -201,6 +247,8 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  --ease-brand: var(--nf-ease-soft);
 }
 
 @layer base {
@@ -213,6 +261,15 @@
     margin: 0;
     font-size: 14px;
     line-height: 1.5;
+  }
+
+  /* Two brand laws, applied once rather than argued at every call site:
+     headings are sentence case, and they are never bold — weight 500 is what
+     carries the hierarchy. */
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: var(--nf-weight-heading);
+    line-height: var(--nf-leading-heading);
+    text-transform: none;
   }
 }
 
@@ -258,11 +315,11 @@
 }
 
 @utility animate-fest-enter {
-  animation: fest-enter 0.2s ease-out;
+  animation: fest-enter 0.2s var(--nf-ease-out);
 }
 
 @utility animate-fest-glow {
-  animation: fest-glow 1.2s ease-out;
+  animation: fest-glow 1.2s var(--nf-ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

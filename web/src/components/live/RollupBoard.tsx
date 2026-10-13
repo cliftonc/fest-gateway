@@ -179,9 +179,9 @@ export function RollupBoard({
   const zero = zeroReason(shown, measure, shownRequests);
 
   return (
-    <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+    <div className="rounded-lg bg-card p-4 ring-1 ring-foreground/10">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 className="text-[11.5px] tracking-wide text-muted-foreground uppercase">{title}</h2>
+        <h2 className="text-[0.8125rem] font-medium text-muted-foreground">{title}</h2>
         <span className="text-[10px] text-muted-foreground">{unitCaption(measure)}</span>
       </div>
 

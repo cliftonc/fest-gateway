@@ -1,0 +1,165 @@
+/*
+ * Nearform brand tokens — vendored, not authored here.
+ *
+ * This is the token half (sections 1 and 1b) of Nearform's published brand
+ * stylesheet, copied verbatim. The other half of that file — its base reset and
+ * its `.nf-*` component classes — is deliberately left out: this dashboard is
+ * Tailwind + shadcn, so the components already exist and the reset would fight
+ * Tailwind's preflight. What we want from the brand is the palette, the type
+ * scale, the spacing and radius scales, and the dark flip.
+ *
+ * Values are read-only. Reference them with var() from `styles.css`, which maps
+ * them onto the shadcn role tokens; never redeclare or alias an --nf-* token.
+ * Re-vendoring a newer brand file should be a straight copy of those two
+ * sections, with no edits to reconcile.
+ *
+ * The dark block keys on [data-theme="dark"], which is the brand's contract.
+ * `lib/theme.tsx` and the pre-paint script in index.html set that attribute
+ * alongside the `.dark` class Tailwind's variant keys on, so both halves of the
+ * cascade flip together.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Primary palette */
+  --nf-midnight:     #000E38;
+  --nf-green:        #00E5A4;
+  --nf-white:        #FFFFFF;
+
+  /* Accent palette */
+  --nf-purple:       #8950FF;
+  --nf-blue:         #166BFF;
+
+  /* Midnight shades */
+  --nf-midnight-80:  #0C3D60;
+  --nf-midnight-50:  #526288;
+  --nf-midnight-30:  #97A1B8;
+  --nf-midnight-10:  #F4F8FA;
+
+  /* Green shades */
+  --nf-green-80:     #33EAAE;
+  --nf-green-50:     #78EEC5;
+  --nf-green-30:     #B2F7E1;
+  --nf-green-10:     #E5FCF5;
+
+  /* Purple shades */
+  --nf-purple-80:    #A173FF;
+  --nf-purple-50:    #C4A7FF;
+  --nf-purple-30:    #DCCAFF;
+  --nf-purple-10:    #F3EDFF;
+
+  /* Blue shades */
+  --nf-blue-80:      #4589FF;
+  --nf-blue-50:      #8AB5FF;
+  --nf-blue-30:      #B9D3FF;
+  --nf-blue-10:      #E8F0FF;
+
+  /* Grey tones */
+  --nf-grey-10:      #EAEBED;
+  --nf-grey-30:      #D9D9D9;
+  --nf-grey-80:      #454551;
+
+  /* Dark surfaces — neutral tier for the dark theme, darker than Midnight 80 */
+  --nf-dark-bg:            #070A14;
+  --nf-dark-surface:       #0D1220;
+  --nf-dark-raised:        #151B2C;
+  --nf-dark-border:        #222941;
+  --nf-dark-border-strong: #354061;
+
+  /* Status — status semantics only, never decoration */
+  --nf-danger:       #D92D20;
+  --nf-danger-10:    #FEF1F0;
+  --nf-warning:      #B45309;
+  --nf-warning-10:   #FDF6EC;
+  --nf-success:      #2B7D63;
+  --nf-success-10:   var(--nf-green-10);
+
+  /* Semantic aliases — these are what the dark theme flips */
+  --nf-text:            var(--nf-midnight);
+  --nf-text-secondary:  var(--nf-midnight-50);
+  --nf-text-on-dark:    var(--nf-white);
+  --nf-surface:         var(--nf-white);
+  --nf-surface-raised:  var(--nf-midnight-10);
+  --nf-surface-dark:    var(--nf-midnight);
+  --nf-field-bg:        var(--nf-white);
+  --nf-border-subtle:   var(--nf-grey-10);
+  --nf-border:          var(--nf-grey-30);
+  --nf-border-strong:   var(--nf-midnight-30);
+  --nf-link:            var(--nf-blue);
+  --nf-link-on-dark:    var(--nf-blue-50);
+  --nf-focus:           var(--nf-blue);
+  --nf-focus-on-dark:   var(--nf-green);
+  --nf-danger-fg:       var(--nf-danger);
+  --nf-warning-fg:      var(--nf-warning);
+  --nf-success-fg:      var(--nf-success);
+
+  /* Typography */
+  --nf-font-sans:  'Inter', system-ui, -apple-system, sans-serif;
+  --nf-font-serif: 'Bitter', Georgia, serif;              /* pull-quotes and table headers only */
+  --nf-font-mono:  ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --nf-text-display: clamp(2.5rem, 5vw, 3.5rem);
+  --nf-text-title:   2rem;
+  --nf-text-h24:     1.5rem;
+  --nf-text-h20:     1.25rem;
+  --nf-text-h16:     1.0625rem;
+  --nf-text-lede:    1.125rem;
+  --nf-text-body:    1rem;
+  --nf-text-small:   0.875rem;
+  --nf-text-label:   0.8125rem;
+  --nf-text-caption: 0.75rem;
+
+  --nf-weight-regular:  400;
+  --nf-weight-heading:  500;   /* headings are never bold — weight 500 carries hierarchy */
+  --nf-weight-semibold: 600;   /* buttons, table emphasis */
+
+  --nf-leading-body:    1.5;
+  --nf-leading-heading: 1.2;
+  --nf-leading-display: 1.08;
+
+  /* Spacing — 4pt scale */
+  --nf-space-1:  4px;
+  --nf-space-2:  8px;
+  --nf-space-3:  12px;
+  --nf-space-4:  16px;
+  --nf-space-5:  20px;
+  --nf-space-6:  24px;
+  --nf-space-8:  32px;
+  --nf-space-10: 40px;
+  --nf-space-12: 48px;
+  --nf-space-16: 64px;
+
+  /* Radius — one scale for the whole system */
+  --nf-radius-xs:   6px;    /* inline code, tiny elements */
+  --nf-radius-sm:   8px;    /* buttons, inputs, selects, alerts, icon tile backings, code blocks */
+  --nf-radius-md:   10px;   /* cards, panels, table wrappers */
+  --nf-radius-lg:   12px;   /* gradient panels, media */
+  --nf-radius-pill: 999px;  /* badges, chips, switches */
+  --nf-radius-control: var(--nf-radius-sm);   /* buttons + form fields share this */
+
+  /* Motion */
+  --nf-ease-out:  cubic-bezier(0.16, 1, 0.3, 1);
+  --nf-ease-soft: cubic-bezier(0.45, 0.05, 0.55, 0.95);   /* gentle in and out, for micro-animations */
+  --nf-dur-fast: 150ms;
+  --nf-dur-base: 200ms;
+  --nf-dur-slow: 400ms;   /* micro-animations, e.g. the button icon slide */
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --nf-text:           var(--nf-white);
+  --nf-text-secondary: var(--nf-midnight-30);
+  --nf-surface:        var(--nf-dark-bg);
+  --nf-surface-raised: var(--nf-dark-surface);
+  --nf-surface-dark:   var(--nf-dark-raised);
+  --nf-field-bg:       var(--nf-dark-surface);
+  --nf-border-subtle:  var(--nf-dark-border);
+  --nf-border:         var(--nf-dark-border);
+  --nf-border-strong:  var(--nf-dark-border-strong);
+  --nf-link:           var(--nf-blue-50);
+  --nf-focus:          var(--nf-green);
+  --nf-danger-fg:      #FF8177;
+  --nf-warning-fg:     #F0B429;
+  --nf-success-fg:     var(--nf-green-80);
+}

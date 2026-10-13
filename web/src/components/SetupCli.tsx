@@ -133,7 +133,7 @@ export function SetupCliPanel({ state }: { state: SetupCliState }): React.JSX.El
   return (
     <section
       aria-labelledby="setup-cli-heading"
-      className="relative mb-5 overflow-hidden rounded-xl bg-card ring-1 ring-status-sub/30"
+      className="relative mb-5 overflow-hidden rounded-lg bg-card ring-1 ring-status-sub/30"
     >
       {/* A wash of the subscription tone rather than a solid fill: this is an
           invitation, not a warning, and a fully saturated panel would read as
@@ -146,7 +146,7 @@ export function SetupCliPanel({ state }: { state: SetupCliState }): React.JSX.El
       <div className="relative p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 id="setup-cli-heading" className="text-base font-semibold text-foreground">
+            <h2 id="setup-cli-heading" className="text-base font-medium text-foreground">
               Point Claude Code at Fest
             </h2>
             <p className="mt-1 max-w-[68ch] text-[13px] text-muted-foreground">

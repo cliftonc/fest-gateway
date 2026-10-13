@@ -47,6 +47,45 @@ step — the server has none.
   kept separate from shadcn's UI-role tokens on purpose. Every use is paired
   with text, because "the red one" is not information an admin can act on over
   a screen share.
+- **`src/nearform-brand.md` is the design contract — read it before changing
+  anything visual.** It is Nearform's published `design.md`, vendored verbatim,
+  and it settles most arguments this file would otherwise have to: the palette
+  and what each colour is *for*, the type scale, the radius scale, what buttons
+  and tables and alerts look like, and a "never ship" list. Its companion
+  `src/nearform-brand.css` is the token half of the published stylesheet, also
+  verbatim. Both are upstream files: never edit either to reconcile it with
+  something here, so that re-vendoring stays a straight copy.
+- **No hex in `styles.css`, and none anywhere else either.** `nearform-brand.css`
+  is the only file allowed to name a colour. `styles.css` maps those `--nf-*`
+  tokens onto shadcn's roles; components read the shadcn roles. A new colour
+  means finding the brand token that already means it, not adding one.
+- The theme sets **both** `class="dark"` and `data-theme="dark"` on `<html>`:
+  Tailwind's `dark:` variant keys on the class, the brand tokens key on the
+  attribute. `lib/theme.tsx` and the pre-paint script in `index.html` each set
+  both; changing one without the other paints half the page on the wrong theme.
+- The brand laws that bite most often here, all of them from
+  `nearform-brand.md`: Midnight text on Green, never white on green (which is
+  why `--primary` is the vivid green in both themes and `--primary-foreground`
+  is Midnight); green is a backing colour and never a text colour, so links use
+  `--link`; sentence case everywhere and UK English; headings are weight 500,
+  never bold — weight 600 is for buttons and table emphasis only; **no tracked
+  uppercase eyebrow labels**, which is what every small label in this dashboard
+  used to be; no drop shadows, so panels are hairline rings; alerts and status
+  badges are tinted surfaces (`--tint-*`) and never carry a coloured
+  left-border stripe; tables have a green Bitter header band and no zebra
+  striping. Bitter is loaded for that one role — nothing else in the dashboard
+  may reach for the serif.
+- The table head is the one deliberate deviation, and it lives in the
+  `--table-head*` tokens rather than in `table.tsx`. The brand's solid green
+  band assumes a 1120px container holding one or two tables; this dashboard is
+  1400px wide and stacks three to a screen, where a solid band stops reading as
+  an accent. Light drops the fill to the pastel tier, dark inverts it to a
+  raised panel with green Bitter text (green on dark is sanctioned; only green
+  on white is banned), and both keep the vivid green as the rule beneath the
+  header. Turn the band back up by pointing `--table-head` at `--nf-green`.
+- Radius comes off the brand's five-step scale and nowhere else: controls
+  (buttons, inputs, selects, alerts) at 8px = `rounded-md`, cards and panels at
+  10px = `rounded-lg`, badges pill. `rounded-xl` and friends are off-scale.
 - **Never import from `server/`.** Only from `shared/` and from `web/src`
   itself — the server's import graph reaches `node:sqlite`, which the
   browser bundle must never see. If a type is needed on both sides, it goes

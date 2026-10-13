@@ -33,8 +33,8 @@ function Figure({
             ? "text-status-sub"
             : "";
   return (
-    <div className="rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10">
-      <div className="text-[11px] tracking-wide text-muted-foreground uppercase">{label}</div>
+    <div className="rounded-lg bg-card px-4 py-3 ring-1 ring-foreground/10">
+      <div className="text-[0.8125rem] font-medium text-muted-foreground">{label}</div>
       <div className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass}`}>{value}</div>
       {note !== undefined && (
         <div className="mt-0.5 text-[11px] text-muted-foreground">{note}</div>

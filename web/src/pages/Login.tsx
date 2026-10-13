@@ -52,7 +52,7 @@ export function LoginPage({
 
   return (
     <div className="grid min-h-screen place-items-center p-6">
-      <div className="w-full max-w-[380px] rounded-xl bg-card p-6 ring-1 ring-foreground/10">
+      <div className="w-full max-w-[380px] rounded-lg bg-card p-6 ring-1 ring-foreground/10">
         <div className="-mx-2.5">
           <Brand />
         </div>

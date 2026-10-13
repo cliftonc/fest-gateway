@@ -18,7 +18,9 @@
       // Pre-paint, so the dashboard never flashes the wrong theme on reload.
       // Deliberately inline: a fetched file would be a round trip before first
       // paint, which is the thing this exists to avoid. Kept in sync with
-      // src/lib/theme.tsx, which owns the same key and class name.
+      // src/lib/theme.tsx, which owns the same key, class name and attribute.
+      // The class drives Tailwind's `dark:` variant; data-theme drives the
+      // vendored Nearform brand tokens. Both, or the page paints half-flipped.
       (function () {
         try {
           var stored = localStorage.getItem("fest-theme");
@@ -29,9 +31,11 @@
                 ? "light"
                 : "dark";
           document.documentElement.classList.toggle("dark", theme === "dark");
+          document.documentElement.dataset.theme = theme;
           document.documentElement.style.colorScheme = theme;
         } catch (e) {
           document.documentElement.classList.add("dark");
+          document.documentElement.dataset.theme = "dark";
         }
       })();
     </script>

@@ -8,7 +8,8 @@
  *
  * The first paint is handled by an inline script in index.html, not here: by
  * the time React runs, the user has already seen a frame. This module has to
- * agree with that script about the storage key and the class name.
+ * agree with that script about the storage key, the class name and the
+ * `data-theme` attribute.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
@@ -43,7 +44,11 @@ function storedTheme(): Theme | null {
 }
 
 function applyTheme(theme: Theme): void {
+  // Two switches for one choice: Tailwind's `dark:` variant keys on the class,
+  // the vendored brand tokens key on `[data-theme]`. Setting only one would
+  // leave half the cascade on the other theme.
   document.documentElement.classList.toggle("dark", theme === "dark");
+  document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
 }
 

@@ -320,9 +320,9 @@ export function LivePage(): React.JSX.Element {
         />
       </div>
 
-      <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+      <div className="rounded-lg bg-card p-4 ring-1 ring-foreground/10">
         <div className="mb-3 flex items-baseline justify-between gap-3">
-          <h2 className="text-[11.5px] tracking-wide text-muted-foreground uppercase">
+          <h2 className="text-[0.8125rem] font-medium text-muted-foreground">
             Who paid, in this window
           </h2>
           <span className="text-[11px] text-muted-foreground">
@@ -339,12 +339,12 @@ export function LivePage(): React.JSX.Element {
         */}
         <div className="mb-3 flex flex-wrap items-end gap-x-8 gap-y-2">
           <div>
-            <div className="text-[11px] tracking-wide text-muted-foreground uppercase">Billed</div>
+            <div className="text-[0.8125rem] font-medium text-muted-foreground">Billed</div>
             <div className="num mt-0.5 text-xl font-semibold">{stats.spend}</div>
             <div className="text-[11px] text-muted-foreground">org spend</div>
           </div>
           <div>
-            <div className="text-[11px] tracking-wide text-muted-foreground uppercase">
+            <div className="text-[0.8125rem] font-medium text-muted-foreground">
               Value at list rates
             </div>
             <div className="num mt-0.5 text-xl font-semibold text-status-sub">{stats.value}</div>

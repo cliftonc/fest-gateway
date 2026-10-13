@@ -109,7 +109,7 @@ export function Stat({
 }): React.JSX.Element {
   return (
     <div>
-      <div className="text-[11.5px] tracking-wide text-muted-foreground uppercase">{label}</div>
+      <div className="text-[0.8125rem] font-medium text-muted-foreground">{label}</div>
       <div
         className={`mt-0.5 text-xl font-semibold ${tone === undefined ? "" : TONE_TEXT[tone]}`}
       >
@@ -249,9 +249,7 @@ export function Table({
                   // drops that when it sees a utility it recognises as the same
                   // property — `num` is a custom `@utility`, so on its own it
                   // survives the merge and then loses to `text-left` anyway.
-                  className={`text-[11.5px] tracking-wide whitespace-nowrap uppercase${
-                    isNum ? " num text-right" : ""
-                  }`}
+                  className={`whitespace-nowrap${isNum ? " num text-right" : ""}`}
                 >
                   {label}
                 </TableHead>

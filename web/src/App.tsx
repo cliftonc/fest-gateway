@@ -74,7 +74,7 @@ export function App(): React.JSX.Element {
   if (me.isError) {
     return (
       <div className="grid min-h-screen place-items-center p-6">
-        <div className="w-full max-w-sm rounded-xl bg-card p-6 ring-1 ring-foreground/10">
+        <div className="w-full max-w-sm rounded-lg bg-card p-6 ring-1 ring-foreground/10">
           <Brand />
           <p className="mt-4 text-status-bad">Cannot reach the gateway: {me.error.message}</p>
         </div>
@@ -102,7 +102,7 @@ export function Brand(): React.JSX.Element {
           not the product's identity, so it stays small and quiet. */}
       <NearformMark className="mt-0.5 h-5 w-5 shrink-0 text-foreground" />
       <div className="leading-tight">
-        <div className="text-[17px] font-bold tracking-[0.02em]">Fest</div>
+        <div className="text-[17px] font-semibold tracking-[0.02em]">Fest</div>
       </div>
     </div>
   );
@@ -212,7 +212,7 @@ function Dashboard({
       <main className="overflow-y-auto">
         <div className="max-w-[1400px] px-6 pt-5 pb-15">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-          <h1 className="text-xl font-semibold">{PAGE_TITLES[page]}</h1>
+          <h1 className="text-xl font-medium">{PAGE_TITLES[page]}</h1>
           <div className="flex flex-wrap items-center gap-2">
             {setup !== null && <SetupCliToggle state={setup} />}
             {showRange && (
