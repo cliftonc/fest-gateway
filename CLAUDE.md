@@ -16,6 +16,7 @@ npm run build           # web/dist — only needed for `npm start` / Docker / np
 npm start                # the built gateway, serving web/dist if present
 npm run cli -- <cmd>       # the fest CLI, e.g. `npm run cli -- whoami`
 npm run canary               # version gate — re-run before rolling out a new Claude Code release
+npm run bench                  # performance harness → docs/perf/<date>-ramp.html; see docs/PERF.md
 ```
 
 ## Releasing

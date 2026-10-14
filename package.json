@@ -48,6 +48,7 @@
     "prepack": "npm run build && npm run build:package",
     "capture": "node tools/capture-server.ts",
     "canary": "node tools/canary.ts",
+    "bench": "node tools/bench/run.ts",
     "prices:sync": "node tools/prices-sync.ts",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",

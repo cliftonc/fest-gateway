@@ -45,6 +45,12 @@ jobs:
       - name: Build the dashboard
         run: npm run build
 
+      # Only proves the harness still runs end to end (real gateway, cluster,
+      # generators, DB check, profiles, report). Shared runners are far too
+      # noisy for its numbers to gate anything.
+      - name: Bench smoke
+        run: npm run bench -- --quick --out /tmp/bench/quick
+
       # The published package cannot be TypeScript — Node refuses to strip
       # types under node_modules. That break is invisible in this repo, where
       # everything runs from source, and only appears once someone installs it.

@@ -423,6 +423,7 @@ inside it — read the relevant one before working there.
 | [TAGS.md](docs/TAGS.md) | tagging usage by team, project or anything else, and filtering the dashboard by it |
 | [POSTURES.md](docs/POSTURES.md) | subscription vs. key posture |
 | [CANARY.md](docs/CANARY.md) | the version-upgrade gate |
+| [PERF.md](docs/PERF.md) | `npm run bench`: how Fest scales and where its CPU goes; saved reports in `docs/perf/` |
 | [PHASE0.md](docs/PHASE0.md) · [PHASE0-RESULTS.md](docs/PHASE0-RESULTS.md) | the gating experiment, and what it found |
 | [CLIENT-GATEWAY-PROTOCOL.md](docs/CLIENT-GATEWAY-PROTOCOL.md) | what Claude Code actually sends |
 | [FRONTEND.md](docs/FRONTEND.md) | the dashboard's screens and data flow |

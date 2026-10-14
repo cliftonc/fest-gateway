@@ -29,6 +29,11 @@ duplicates it.
   dimension.
 - `CLI-AUTH.md` — OAuth setup and the `fest login`/`whoami`/`claude`/`codex`/`copilot`/`logout`
   flow end to end.
+- `PERF.md` — `npm run bench`: what the harness simulates, what each number
+  in a report means, and how to read the hotspot tables.
+- `perf/` — **data, not documentation.** Saved bench reports (`.html` plus the
+  `.json` it renders from), named `<date>-<name>`. Regenerate rather than
+  hand-edit; re-render the HTML from the JSON with `--render`.
 - `canary-history.jsonl` — **data, not documentation.** Appended to by
   `npm run canary`; don't hand-edit it, don't treat it as something to keep
   in sync with prose changes elsewhere.
