@@ -197,12 +197,15 @@ kind of persistence.
   the dashboard can filter and group by team, project or anything else. `fest
   claude|codex|copilot` send them on every request, and accept leading
   `--tag key=value` flags for one session (`fest claude --tag project=x
-  --resume`). `fest tags set` saves for the **current directory and everything
-  under it**; `-g` saves globally. Precedence, lowest first: `project=<git repo
-  name>` → global → saved directories, outermost first →
+  --resume`). Inside a git repo, `fest tags set` saves **in the repo**: the
+  `"fest"` key of the root `package.json`, else `.fest.json` at the root, so
+  committing it tags every clone. Outside a repo it saves for the current
+  directory and everything under it; `-g` saves globally. Both of those live in
+  `~/.fest/tags.json`, which login and logout leave alone. Precedence, lowest
+  first: `project=<git repo name>` → global → directory layers (the repo file
+  and saved directories), narrowest last →
   `FEST_TAGS="team=platform,project=fest"` → `--tag`. An empty value
-  (`project=`) removes a key. Saved tags live in `~/.fest/tags.json`, which login
-  and logout leave alone. Each command prints the tags it is using.
+  (`project=`) removes a key. Each command prints the tags it is using.
   See [TAGS.md](TAGS.md), including how to tag without the CLI.
 - **`fest logout`** — deletes `~/.fest/config.json` only. It does **not**
   revoke the token server-side; that stays an explicit `fest token revoke

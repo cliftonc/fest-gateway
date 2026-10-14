@@ -10,7 +10,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,6 +27,7 @@ const {
   runTags,
   sessionTags,
   canonicalDir,
+  readRepoTags,
   TAGS_FILE,
 } = await import("../cli/tags.ts");
 const { buildClaudeEnv } = await import("../cli/claude.ts");
@@ -164,4 +166,68 @@ test("fest tags saves for the current directory unless -g", async () => {
 test("the original flat tags.json reads as global tags", async () => {
   writeFileSync(TAGS_FILE, JSON.stringify({ team: "legacy" }));
   assert.deepEqual(await readSavedTags(), { global: { team: "legacy" }, paths: {} });
+});
+
+/** A fresh git repo under the fake home, so `fest tags set` sees a root. */
+function makeRepo(name: string): string {
+  const dir = canonicalDir(mkdtempSync(join(fakeHome, `${name}-`)));
+  execFileSync("git", ["init", "-q", dir]);
+  return dir;
+}
+
+test("in a repo with a package.json, tags go in its fest key and keep its formatting", async () => {
+  const lines: string[] = [];
+  const out = (s: string): void => void lines.push(s);
+  const repo = makeRepo("node-app");
+  const sub = join(repo, "src");
+  mkdirSync(sub);
+  writeFileSync(join(repo, "package.json"), '{\n\t"name": "app",\n\t"version": "1.0.0"\n}\n');
+
+  await runTags(["set", "team=platform", "project=blah"], { out, cwd: sub });
+  const raw = readFileSync(join(repo, "package.json"), "utf8");
+  assert.equal(raw, '{\n\t"name": "app",\n\t"version": "1.0.0",\n\t"fest": {\n\t\t"team": "platform",\n\t\t"project": "blah"\n\t}\n}\n');
+  assert.ok(!existsSync(join(repo, ".fest.json")));
+  assert.ok(lines.some((l) => l.includes("commit package.json")), lines.join("\n"));
+  assert.equal((await readSavedTags()).paths[sub], undefined, "nothing saved in ~/.fest for a repo");
+
+  assert.deepEqual(await sessionTags([], sub), { project: "blah", team: "platform" });
+
+  await runTags(["unset", "team", "project"], { out, cwd: repo });
+  assert.equal(readFileSync(join(repo, "package.json"), "utf8"), '{\n\t"name": "app",\n\t"version": "1.0.0"\n}\n', "an emptied layer removes the key");
+});
+
+test("in a repo without a package.json, tags go in .fest.json at the root", async () => {
+  const repo = makeRepo("go-app");
+  const opts = { out: () => {}, cwd: repo };
+  await runTags(["set", "team=data"], opts);
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, ".fest.json"), "utf8")), { team: "data" });
+  assert.equal((await sessionTags([], repo)).team, "data");
+  // Once a .fest.json exists it stays the place, even if a package.json appears.
+  writeFileSync(join(repo, "package.json"), "{}\n");
+  await runTags(["set", "env=dev"], opts);
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, ".fest.json"), "utf8")), { team: "data", env: "dev" });
+  assert.equal(readFileSync(join(repo, "package.json"), "utf8"), "{}\n");
+  await runTags(["unset", "team", "env"], opts);
+  assert.ok(!existsSync(join(repo, ".fest.json")), "an emptied .fest.json is removed");
+});
+
+test("the narrowest layer wins: global < repo file < a saved directory inside the repo", async () => {
+  const repo = makeRepo("layered");
+  const inner = join(repo, "packages", "web");
+  mkdirSync(inner, { recursive: true });
+  writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "x", fest: { team: "repo-team", project: "mono" } }));
+  writeFileSync(TAGS_FILE, JSON.stringify({ global: { team: "global-team", env: "g" }, paths: { [repo]: { team: "personal" }, [inner]: { project: "web" } } }));
+
+  assert.deepEqual(await sessionTags([], repo), { team: "repo-team", env: "g", project: "mono" }, "the committed file wins a tie");
+  assert.deepEqual(await sessionTags([], inner), { team: "repo-team", env: "g", project: "web" });
+  writeFileSync(TAGS_FILE, "{}");
+});
+
+test("a broken package.json contributes no tags but is never rewritten", async () => {
+  const repo = makeRepo("broken");
+  writeFileSync(join(repo, "package.json"), "{ not json");
+  assert.deepEqual((await readRepoTags(repo)).tags, {});
+  assert.match((await sessionTags([], repo)).project ?? "", /^broken-/, "the repo-name default still applies");
+  await assert.rejects(runTags(["set", "team=x"], { out: () => {}, cwd: repo }), SyntaxError);
+  assert.equal(readFileSync(join(repo, "package.json"), "utf8"), "{ not json");
 });

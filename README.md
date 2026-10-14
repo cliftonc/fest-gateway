@@ -53,7 +53,7 @@ fest logout     # forget the local token (does not revoke it server-side)
 fest claude gw  # force org credentials + the gateway's extra models
 fest codex      # OpenAI Codex CLI, on its own ChatGPT login or API key
 fest copilot    # GitHub Copilot CLI, on its own Copilot login
-fest tags set team=platform   # label usage from this directory down (-g: everywhere)
+fest tags set team=platform   # label usage; saved in the repo (package.json or .fest.json), -g: everywhere
 ```
 
 Codex and Copilot CLI are metered into the same dashboard, labelled by client.

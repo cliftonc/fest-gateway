@@ -7,15 +7,19 @@
  *
  *   1. `project=<git repo name>`, when inside a repo
  *   2. global saved tags (`fest tags set -g team=platform`)
- *   3. saved tags for the current directory and each directory above it,
- *      outermost first (`fest tags set team=data` in `~/work` applies to every
- *      repo under it; `~/work/fest` can override that)
+ *   3. directory layers containing the cwd, outermost first, so the narrowest
+ *      wins: the repo's own file (below) and any directory saved in
+ *      `~/.fest/tags.json` (`fest tags set team=data` in `~/work`, outside a
+ *      repo, applies to every repo under it). The repo file wins a tie.
  *   4. `FEST_TAGS="team=platform,project=fest"`
  *   5. `--tag key=value` on the command line
  *
- * Saving is per-directory by default because tags describe the WORK — which
- * team, which project — and the directory is the closest thing a laptop has
- * to that. `-g` is for the few that follow the developer everywhere.
+ * Inside a git repo, `fest tags set` writes to the repo itself — the `fest`
+ * key of a root `package.json`, else `.fest.json` at the root — so the tags are
+ * committed with the code and every clone picks them up with no setup. Tags
+ * describe the WORK, and the repo is the work. Outside a repo it saves for the
+ * directory in `~/.fest/tags.json`; `-g` is for the few that follow the
+ * developer everywhere.
  *
  * The result rides in the `~…` path segment of the base URL each command
  * already builds (see `shared/tags.ts`), so one mechanism serves all three
@@ -28,7 +32,7 @@
 
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { CONFIG_DIR } from "./config.ts";
@@ -82,18 +86,24 @@ export function repoTagValue(name: string): string | null {
   return cleaned === "" ? null : cleaned;
 }
 
-/** The current git repo's directory name, or null outside a repo / without git. */
-export function gitRepoName(cwd: string = process.cwd()): string | null {
+/** The current git repo's root, symlink-resolved, or null outside a repo / without git. */
+export function gitRoot(cwd: string = process.cwd()): string | null {
   try {
     const top = execFileSync("git", ["rev-parse", "--show-toplevel"], {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    return top === "" ? null : repoTagValue(basename(top));
+    return top === "" ? null : canonicalDir(top);
   } catch {
     return null;
   }
+}
+
+/** The current git repo's directory name, or null outside a repo / without git. */
+export function gitRepoName(cwd: string = process.cwd()): string | null {
+  const root = gitRoot(cwd);
+  return root === null ? null : repoTagValue(basename(root));
 }
 
 /**
@@ -108,10 +118,20 @@ export interface SavedTags {
 
 const EMPTY_SAVED: SavedTags = { global: {}, paths: {} };
 
+/** Tags committed to a repo, read from its root. */
+export interface RepoTags {
+  /** The repo root, symlink-resolved. */
+  readonly dir: string;
+  /** Root-relative names of the files they came from, for display. */
+  readonly files: readonly string[];
+  readonly tags: Readonly<Record<string, string>>;
+}
+
 /** Pure: the precedence chain above, given each layer's raw input. */
 export function resolveTags(layers: {
   repo: string | null;
   saved: SavedTags;
+  repoFile?: RepoTags | null;
   cwd: string;
   env: string | undefined;
   flags: readonly string[];
@@ -119,7 +139,7 @@ export function resolveTags(layers: {
   const pairs: TagPair[] = [];
   if (layers.repo !== null) pairs.push({ key: "project", value: layers.repo });
   pairs.push(...toPairs(layers.saved.global));
-  for (const [, layer] of pathLayers(layers.saved, layers.cwd)) pairs.push(...toPairs(layer));
+  for (const { layer } of dirLayers(layers.saved, layers.repoFile ?? null, layers.cwd)) pairs.push(...toPairs(layer));
   if (layers.env !== undefined) pairs.push(...parseTagPairs(layers.env));
   for (const flag of layers.flags) {
     const parsed = parseTagPairs(flag);
@@ -140,6 +160,26 @@ export function pathLayers(
   return Object.entries(saved.paths)
     .filter(([dir]) => cwd === dir || cwd.startsWith(dir.endsWith(sep) ? dir : dir + sep))
     .sort((a, b) => a[0].length - b[0].length);
+}
+
+/**
+ * Every directory layer that applies at `cwd`, outermost first: the saved
+ * directories containing it plus the repo's own file. Sorted by depth, so the
+ * narrowest wins; the repo file sorts after a saved entry for the same
+ * directory, because a committed file is the more deliberate statement.
+ */
+export function dirLayers(
+  saved: SavedTags,
+  repoFile: RepoTags | null,
+  cwd: string,
+): Array<{ dir: string; files: readonly string[] | null; layer: Readonly<Record<string, string>> }> {
+  const out: Array<{ dir: string; files: readonly string[] | null; layer: Readonly<Record<string, string>> }> =
+    pathLayers(saved, cwd).map(([dir, layer]) => ({ dir, files: null, layer }));
+  if (repoFile !== null && Object.keys(repoFile.tags).length > 0) {
+    out.push({ dir: repoFile.dir, files: repoFile.files, layer: repoFile.tags });
+  }
+  // Stable, so a tie keeps the repo file (pushed last) on top.
+  return out.sort((a, b) => a.dir.length - b.dir.length);
 }
 
 /** Symlink-resolved, so `/tmp/x` and `/private/tmp/x` are one directory. */
@@ -190,14 +230,111 @@ async function writeSavedTags(saved: SavedTags): Promise<void> {
   await writeFile(TAGS_FILE, JSON.stringify(saved, null, 2) + "\n", { mode: 0o600 });
 }
 
+export const PACKAGE_JSON = "package.json";
+export const FEST_JSON = ".fest.json";
+
+/** A JSON object from `path`, null when the file is absent. */
+async function readJsonObject(path: string): Promise<Record<string, unknown> | null> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+  const parsed: unknown = JSON.parse(raw);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${path}: expected a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * The tags committed at a repo root: `package.json`'s `fest` key, then
+ * `.fest.json` over it. Both are read, so a `.fest.json` keeps working after
+ * the repo later gains a `package.json`.
+ *
+ * Never throws: a broken `package.json` is the repo's problem, and must not
+ * stop `fest claude` from starting. It just contributes no tags.
+ */
+export async function readRepoTags(root: string): Promise<RepoTags> {
+  const files: string[] = [];
+  const tags: Record<string, string> = {};
+  for (const [file, pick] of [
+    [PACKAGE_JSON, (o: Record<string, unknown>) => o["fest"]],
+    [FEST_JSON, (o: Record<string, unknown>) => o],
+  ] as const) {
+    let obj: Record<string, unknown> | null;
+    try {
+      obj = await readJsonObject(join(root, file));
+    } catch {
+      continue;
+    }
+    if (obj === null) continue;
+    const layer = readLayer(pick(obj));
+    if (Object.keys(layer).length === 0) continue;
+    files.push(file);
+    Object.assign(tags, layer);
+  }
+  return { dir: root, files, tags };
+}
+
+/**
+ * Write a repo's committed tags where {@link readRepoTags} finds them: an
+ * existing `.fest.json` if there is one (somebody chose it), else the `fest`
+ * key of a root `package.json`, else a new `.fest.json`. The rest of
+ * `package.json` is left as it was, down to its indentation, and an emptied
+ * layer removes the key or the file rather than leaving `{}` behind.
+ *
+ * `update` gets that file's own layer and returns the new one. Returns the
+ * file written and what went in it. Unlike reading, a file that does not parse
+ * is an error here — rewriting it would destroy it.
+ */
+export async function writeRepoTags(
+  root: string,
+  update: (current: Record<string, string>) => Record<string, string>,
+): Promise<{ file: string; layer: Record<string, string> }> {
+  const festPath = join(root, FEST_JSON);
+  const pkgPath = join(root, PACKAGE_JSON);
+  const fest = await readJsonObject(festPath);
+  if (fest === null) {
+    let pkgRaw: string | null = null;
+    try {
+      pkgRaw = await readFile(pkgPath, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    if (pkgRaw !== null) {
+      const pkg = (await readJsonObject(pkgPath))!;
+      const layer = update(readLayer(pkg["fest"]));
+      if (Object.keys(layer).length === 0) delete pkg["fest"];
+      else pkg["fest"] = layer;
+      const indent = /^([ \t]+)\S/m.exec(pkgRaw)?.[1] ?? 2;
+      const eol = pkgRaw.endsWith("\n") ? "\n" : "";
+      await writeFile(pkgPath, JSON.stringify(pkg, null, indent) + eol);
+      return { file: PACKAGE_JSON, layer };
+    }
+  }
+  const layer = update(readLayer(fest));
+  await writeLayerFile(festPath, layer);
+  return { file: FEST_JSON, layer };
+}
+
+async function writeLayerFile(path: string, layer: Readonly<Record<string, string>>): Promise<void> {
+  if (Object.keys(layer).length === 0) await rm(path, { force: true });
+  else await writeFile(path, JSON.stringify(layer, null, 2) + "\n");
+}
+
 /** Everything a client command needs: the tags, already resolved. */
 export async function sessionTags(
   flags: readonly string[],
   cwd: string = process.cwd(),
 ): Promise<Record<string, string>> {
+  const root = gitRoot(cwd);
   return resolveTags({
-    repo: gitRepoName(cwd),
+    repo: root === null ? null : repoTagValue(basename(root)),
     saved: await readSavedTags(),
+    repoFile: root === null ? null : await readRepoTags(root),
     cwd: canonicalDir(cwd),
     env: process.env.FEST_TAGS,
     flags,
@@ -229,9 +366,9 @@ function showDir(dir: string): string {
 }
 
 /**
- * `fest tags`                          saved layers that apply here, and the result
- * `fest tags set [-g] k=v [k=v …]`     save for this directory (or globally)
- * `fest tags unset [-g] k [k …]`       remove from this directory (or globally)
+ * `fest tags`                          the layers that apply here, and the result
+ * `fest tags set [-g] k=v [k=v …]`     save in this repo (or directory, or globally)
+ * `fest tags unset [-g] k [k …]`       remove from the same place
  */
 export async function runTags(
   argv: readonly string[],
@@ -242,48 +379,61 @@ export async function runTags(
   const global = argv.includes("-g") || argv.includes("--global");
   const [sub, ...rest] = argv.filter((a) => a !== "-g" && a !== "--global");
   const saved = await readSavedTags();
-  const where = global ? "globally" : `for ${showDir(cwd)}`;
-  const current = global ? saved.global : (saved.paths[cwd] ?? {});
+  const root = gitRoot(cwd);
 
-  const store = async (layer: Record<string, string>): Promise<void> => {
-    const paths = { ...saved.paths };
-    if (!global) {
-      if (Object.keys(layer).length === 0) delete paths[cwd];
-      else paths[cwd] = layer;
-    }
-    await writeSavedTags({ global: global ? layer : saved.global, paths });
-    out(`saved ${where}: ${showLayer(layer)}`);
-  };
-
+  let edit: ((current: Record<string, string>) => Record<string, string>) | null = null;
   if (sub === "set") {
     if (rest.length === 0) throw new Error("usage: fest tags set [-g] key=value [key=value …]");
-    const next = { ...current };
-    for (const arg of rest) {
+    const pairs = rest.flatMap((arg) => {
       const parsed = parseTagPairs(arg);
       if (parsed.length === 0) throw new Error(`${arg}: expected key=value`);
-      // An empty value is kept: here it means "not in this directory".
-      for (const p of parsed) next[p.key] = p.value;
-    }
-    await store(next);
-    return;
-  }
-
-  if (sub === "unset") {
+      return parsed;
+    });
+    // An empty value is kept: here it means "not in this repo / directory".
+    edit = (current) => Object.assign({ ...current }, ...pairs.map((p) => ({ [p.key]: p.value })));
+  } else if (sub === "unset") {
     if (rest.length === 0) throw new Error("usage: fest tags unset [-g] key [key …]");
-    const next = { ...current };
-    for (const key of rest) delete next[key.toLowerCase()];
-    await store(next);
+    edit = (current) => {
+      const next = { ...current };
+      for (const key of rest) delete next[key.toLowerCase()];
+      return next;
+    };
+  } else if (sub !== undefined) {
+    throw new Error(`unknown \`fest tags ${sub}\`. Try \`fest tags set key=value\`.`);
+  }
+
+  if (edit !== null) {
+    if (global) {
+      const layer = edit({ ...saved.global });
+      await writeSavedTags({ global: layer, paths: saved.paths });
+      out(`saved globally: ${showLayer(layer)}`);
+    } else if (root !== null) {
+      // In a repo the tags go IN the repo, so every clone gets them.
+      const { file, layer } = await writeRepoTags(root, edit);
+      out(`saved in ${join(showDir(root), file)}: ${showLayer(layer)}`);
+      out(`commit ${file} so everyone working in this repo gets the same tags.`);
+    } else {
+      const layer = edit({ ...(saved.paths[cwd] ?? {}) });
+      const paths = { ...saved.paths };
+      if (Object.keys(layer).length === 0) delete paths[cwd];
+      else paths[cwd] = layer;
+      await writeSavedTags({ global: saved.global, paths });
+      out(`saved for ${showDir(cwd)}: ${showLayer(layer)}`);
+    }
     return;
   }
 
-  if (sub !== undefined) throw new Error(`unknown \`fest tags ${sub}\`. Try \`fest tags set key=value\`.`);
-
+  const repoFile = root === null ? null : await readRepoTags(root);
   out(`global:    ${showLayer(saved.global)}`);
-  for (const [dir, layer] of pathLayers(saved, cwd)) out(`${showDir(dir)}:  ${showLayer(layer)}`);
+  for (const { dir, files, layer } of dirLayers(saved, repoFile, cwd)) {
+    const label = files === null ? showDir(dir) : files.map((f) => join(showDir(dir), f)).join(" + ");
+    out(`${label}:  ${showLayer(layer)}`);
+  }
   const effective = await sessionTags([], cwd);
   out(`effective: ${decodeURIComponent(formatTags(effective)) || "(none)"}`);
   out("");
-  out("`fest tags set` saves for this directory and everything under it; -g saves globally.");
+  out("`fest tags set` saves in this repo (package.json's \"fest\" key, else .fest.json) or,");
+  out("outside a repo, for this directory and below; -g saves globally. The narrowest wins.");
   out("Effective also adds project=<git repo name> and FEST_TAGS. Override per session with");
   out("--tag key=value; an empty value (project=) removes a key.");
 }

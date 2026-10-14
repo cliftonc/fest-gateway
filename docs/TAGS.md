@@ -55,26 +55,49 @@ Layers, lowest precedence first:
 
 1. `project=<git repo name>` when you run inside a repo
 2. global saved tags: `fest tags set -g team=platform`
-3. saved tags for the current directory **and every directory above it**,
-   outermost first. `fest tags set team=data` in `~/work` applies to every
-   repo under `~/work`, and `~/work/fest` can override it.
+3. directory layers that contain the current directory, **narrowest last**, so
+   the narrowest wins:
+   - the repo's own tags, committed at its root (below)
+   - directories saved in `~/.fest/tags.json`. `fest tags set team=data` in
+     `~/work`, which is not a repo, applies to every repo under it.
+
+   When a repo file and a saved directory are the same directory, the repo
+   file wins.
 4. `FEST_TAGS="team=platform,project=fest"`
 5. `--tag key=value` before the client's own args:
    `fest claude --tag project=spike --resume`
 
-`fest tags set` saves for the directory you are in, because tags describe the
-work, and the directory is the closest thing a laptop has to that. Use `-g`
-for the few tags that follow you everywhere. Saved tags live in
-`~/.fest/tags.json`, which login and logout leave alone.
+**In a git repo, `fest tags set` writes to the repo**, because tags describe
+the work and the repo is the work. Commit the file and every clone sends the
+same tags with no setup:
+
+- with a root `package.json`, its `"fest"` key:
+
+  ```json
+  { "name": "my-app", "fest": { "team": "platform", "project": "checkout" } }
+  ```
+
+- otherwise `.fest.json` at the root, holding the same object:
+  `{ "team": "platform", "project": "checkout" }`. An existing `.fest.json` is
+  kept as the place to write, even after the repo gains a `package.json`.
+
+Both are read when both exist, with `.fest.json` on top. The rest of
+`package.json` is left as it was, including its indentation. Unsetting the
+last key removes the `"fest"` key, or deletes `.fest.json`. A `package.json`
+that does not parse contributes no tags and is never rewritten.
+
+Outside a repo, `fest tags set` saves for the current directory in
+`~/.fest/tags.json`. `-g` saves the few tags that follow you everywhere in the
+same file, which login and logout leave alone.
 
 An empty value removes a key that a lower layer set: `--tag project=` for one
-session, or `fest tags set team=` to say "no team in this directory".
+session, or `fest tags set team=` to say "no team in this repo".
 
 ```bash
 fest tags                         # the layers that apply here, and the result
-fest tags set team=data           # for this directory and below
+fest tags set team=data           # in this repo (outside one: this directory and below)
 fest tags set -g team=platform    # everywhere
-fest tags unset team              # from this directory (-g: from global)
+fest tags unset team              # from the same place (-g: from global)
 ```
 
 ## Without the CLI

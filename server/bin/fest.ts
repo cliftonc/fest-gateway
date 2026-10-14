@@ -707,7 +707,8 @@ function printHelp(): void {
       "                                          openai: your OPENAI_API_KEY)\n" +
       "  fest tags | tags set [-g] k=v [k=v...] | tags unset [-g] k [k...]\n" +
       "                                         (labels on your usage, e.g. team=platform; saved\n" +
-      "                                          for this directory and below, -g for everywhere;\n" +
+      "                                          in the repo's package.json \"fest\" key or .fest.json\n" +
+      "                                          (outside a repo: this directory), -g for everywhere;\n" +
       "                                          project defaults to the git repo name; FEST_TAGS\n" +
       "                                          and --tag override, project= removes)\n" +
       "  fest logout",
